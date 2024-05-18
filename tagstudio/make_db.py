@@ -23,6 +23,7 @@ if __name__ == "__main__":
         subtags=set(),
         color="Blue",
         shorthand="arc",
+        icon="foo",
     )
 
     child_tag = Tag(
@@ -31,6 +32,7 @@ if __name__ == "__main__":
         subtags=set(),
         color="Red",
         shorthand="chi",
+        icon="foo",
     )
 
     parent_tag = Tag(
@@ -39,6 +41,7 @@ if __name__ == "__main__":
         subtags=set([child_tag]),
         color="Green",
         shorthand="par",
+        icon="foo",
     )
 
     example_entry = Entry(
