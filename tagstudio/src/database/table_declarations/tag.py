@@ -33,6 +33,7 @@ class Tag(Base):
     )
 
     color: Mapped[str]
+    icon: Mapped[str]
 
     @property
     def subtag_ids(self) -> list[int]:
@@ -48,19 +49,20 @@ class Tag(Base):
         aliases: list[TagAlias],
         subtags: set[Tag],
         color: str,
+        icon: str,
         shorthand: str,
     ):
         self.name = name
+        self.aliases = aliases
         self.subtags = subtags
         self.color = color
+        self.icon = icon
         self.shorthand = shorthand
-        self.aliases = aliases
         super().__init__()
 
     def __str__(self) -> str:
         return (
             f"\nID: {self.id}\nName: {self.name}\n"
-            # TODO
             f"Shorthand: {self.shorthand}\nAliases: {self.alias_strings}\n"
             f"Subtags: {self.subtag_ids}\nColor: {self.color}\n"
         )
