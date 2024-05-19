@@ -7,35 +7,33 @@ import logging
 import os
 import time
 import typing
-from types import FunctionType
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from PIL import Image, ImageQt
-from PySide6.QtCore import Qt, QSize, QEvent
-from PySide6.QtGui import QPixmap, QEnterEvent, QAction
+from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtGui import QAction, QEnterEvent, QPixmap
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
     QBoxLayout,
     QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QVBoxLayout,
+    QWidget,
 )
-
-from src.core.library import ItemType, Library, Entry
-from src.core.ts_core import AUDIO_TYPES, VIDEO_TYPES, IMAGE_TYPES
+from src.alt_core.library import Entry, ItemType, Library
+from src.core.ts_core import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES
 from src.qt.flowlayout import FlowWidget
 from src.qt.helpers.file_opener import FileOpenerHelper
-from src.qt.widgets.thumb_renderer import ThumbRenderer
 from src.qt.widgets.thumb_button import ThumbButton
+from src.qt.widgets.thumb_renderer import ThumbRenderer
 
 if typing.TYPE_CHECKING:
     from src.qt.widgets.preview_panel import PreviewPanel
 
-ERROR = f"[ERROR]"
-WARNING = f"[WARNING]"
-INFO = f"[INFO]"
+ERROR = "[ERROR]"
+WARNING = "[WARNING]"
+INFO = "[INFO]"
 
 DEFAULT_META_TAG_FIELD = 8
 TAG_FAVORITE = 1
@@ -66,27 +64,27 @@ class ItemThumb(FlowWidget):
     tag_group_icon_128.load()
 
     small_text_style = (
-        f"background-color:rgba(0, 0, 0, 192);"
-        f"font-family:Oxanium;"
-        f"font-weight:bold;"
-        f"font-size:12px;"
-        f"border-radius:3px;"
-        f"padding-top: 4px;"
-        f"padding-right: 1px;"
-        f"padding-bottom: 1px;"
-        f"padding-left: 1px;"
+        "background-color:rgba(0, 0, 0, 192);"
+        "font-family:Oxanium;"
+        "font-weight:bold;"
+        "font-size:12px;"
+        "border-radius:3px;"
+        "padding-top: 4px;"
+        "padding-right: 1px;"
+        "padding-bottom: 1px;"
+        "padding-left: 1px;"
     )
 
     med_text_style = (
-        f"background-color:rgba(0, 0, 0, 192);"
-        f"font-family:Oxanium;"
-        f"font-weight:bold;"
-        f"font-size:18px;"
-        f"border-radius:3px;"
-        f"padding-top: 4px;"
-        f"padding-right: 1px;"
-        f"padding-bottom: 1px;"
-        f"padding-left: 1px;"
+        "background-color:rgba(0, 0, 0, 192);"
+        "font-family:Oxanium;"
+        "font-weight:bold;"
+        "font-size:18px;"
+        "border-radius:3px;"
+        "padding-top: 4px;"
+        "padding-right: 1px;"
+        "padding-bottom: 1px;"
+        "padding-left: 1px;"
     )
 
     def __init__(
@@ -388,14 +386,14 @@ class ItemThumb(FlowWidget):
                 self.thumb_button.setMinimumSize(size)
                 self.thumb_button.setMaximumSize(size)
 
-    def update_clickable(self, clickable: typing.Callable):
+    def update_clickable(self, clickable: Callable[[], Any]):
         """Updates attributes of a thumbnail element."""
         # logging.info(f'[GUI] Updating Click Event for element {id(element)}: {id(clickable) if clickable else None}')
         try:
             self.thumb_button.clicked.disconnect()
         except RuntimeError:
             pass
-        if clickable:
+        if callable(clickable):
             self.thumb_button.clicked.connect(clickable)
 
     def update_badges(self):
@@ -412,11 +410,6 @@ class ItemThumb(FlowWidget):
         self.item_id = id
         if id == -1:
             return
-        entry = self.lib.get_entry(self.item_id)
-        filepath = os.path.normpath(
-            f"{self.lib.library_dir}/{entry.path}/{entry.filename}"
-        )
-        self.opener.set_filepath(filepath)
 
     def assign_favorite(self, value: bool):
         # Switching mode to None to bypass mode-specific operations when the

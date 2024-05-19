@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -8,14 +10,11 @@ from .tag import Tag
 
 
 class Entry(Base):
-    """A Library Entry Object. Referenced by ID."""
-
     __tablename__ = "entries"
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    filename: Mapped[str]
-    path: Mapped[str]
+    path: Mapped[Path] = mapped_column(unique=True)
 
     text_fields: Mapped[list[TextField]] = relationship(
         back_populates="entry",
@@ -62,8 +61,11 @@ class Entry(Base):
     # # Text
     # self.word_count: int = None
 
-    def __init__(self, filename: str, path: str, fields: list[Field]) -> None:
-        self.filename = filename
+    def __init__(
+        self,
+        path: Path,
+        fields: list[Field] = [],
+    ) -> None:
         self.path = path
         self.type = None
 

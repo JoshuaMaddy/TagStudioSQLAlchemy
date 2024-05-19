@@ -5,22 +5,16 @@
 """A pagination widget created for TagStudio."""
 # I never want to see this code again.
 
-from PySide6.QtCore import QObject, Signal, QSize
+from PySide6.QtCore import QObject, QSize, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
-    QWidget,
     QHBoxLayout,
-    QPushButton,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSizePolicy,
+    QWidget,
 )
-
-
-# class NumberEdit(QLineEdit):
-# 	def __init__(self, parent=None) -> None:
-# 		super().__init__(parent)
-# 		self.textChanged
 
 
 class Pagination(QWidget, QObject):
@@ -28,7 +22,7 @@ class Pagination(QWidget, QObject):
 
     index = Signal(int)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.page_count: int = 0
         self.current_page_index: int = 0
@@ -130,7 +124,6 @@ class Pagination(QWidget, QObject):
         self.root_layout.addStretch(1)
 
         self._populate_buffer_buttons()
-        # self.update_buttons(page_count=9, index=0)
 
     def update_buttons(self, page_count: int, index: int, emit: bool = True):
         # Guard
@@ -189,6 +182,8 @@ class Pagination(QWidget, QObject):
             # Set Ellipses Sizes
             # I do not know where these magic values were derived from, but
             # this is better than the chain elif's that were here before
+            end_scale = 0
+            srt_scale = 0
             if 8 <= page_count <= 11:
                 end_scale = max(1, page_count - index - 6)
                 srt_scale = max(1, index - 5)
@@ -322,7 +317,7 @@ class Pagination(QWidget, QObject):
                         self.end_buffer_layout.itemAt(i - end_offset).widget().setText(  # type: ignore
                             str(i + 1)
                         )
-                        self._assign_click(
+                        self._assign_click(  # type: ignore
                             self.end_buffer_layout.itemAt(i - end_offset).widget(),  # type: ignore
                             i,
                         )
@@ -426,17 +421,19 @@ class Pagination(QWidget, QObject):
 
     def _goto_page(self, index: int):
         # print(f'GOTO PAGE: {index}')
-        self.update_buttons(self.page_count, index)
+        self.update_buttons(page_count=self.page_count, index=index)
 
-    def _assign_click(self, button: QPushButton, index):
+    def _assign_click(self, button: QPushButton, index: int):
         try:
             button.clicked.disconnect()
         except RuntimeError:
             pass
-        button.clicked.connect(lambda checked=False, i=index: self._goto_page(i))
+        button.clicked.connect(
+            lambda checked=False, index=index: self._goto_page(index)
+        )  # type: ignore
 
     def _populate_buffer_buttons(self):
-        for i in range(max(self.buffer_page_count * 2, 5)):
+        for _ in range(max(self.buffer_page_count * 2, 5)):
             button = QPushButton()
             button.setMinimumSize(self.button_size)
             button.setMaximumSize(self.button_size)
@@ -444,7 +441,7 @@ class Pagination(QWidget, QObject):
             # button.setMaximumHeight(self.button_size.height())
             self.start_buffer_layout.addWidget(button)
 
-        for i in range(max(self.buffer_page_count * 2, 5)):
+        for _ in range(max(self.buffer_page_count * 2, 5)):
             button = QPushButton()
             button.setMinimumSize(self.button_size)
             button.setMaximumSize(self.button_size)
@@ -454,11 +451,10 @@ class Pagination(QWidget, QObject):
 
 
 class Validator(QIntValidator):
-    def __init__(self, bottom: int, top: int, parent=None) -> None:
+    def __init__(self, bottom: int, top: int, parent: QObject | None = None) -> None:
         super().__init__(bottom, top, parent)
 
     def fixup(self, input: str) -> str:
-        # print(input)
         input = input.strip("0")
         print(input)
         return super().fixup(str(self.top()) if input else "1")

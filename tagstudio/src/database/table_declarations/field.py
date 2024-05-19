@@ -27,13 +27,7 @@ class TagBoxTypes(Enum):
 
 
 class DateTimeTypes(Enum):
-    date = "Date"
-    date_taken = "Date Taken"
-    date_created = "Date Created"
-    date_modified = "Date Modified"
-    date_published = "Date Published"
-    date_uploaded = "Date Uploaded"
-    date_released = "Date Released"
+    datetime = "Datetime"
 
 
 class TextField(Base):
@@ -46,13 +40,16 @@ class TextField(Base):
     entry: Mapped[Entry] = relationship()
 
     value: Mapped[str | None]
+    name: Mapped[str]
 
     def __init__(
         self,
+        name: str,
         type: TextFieldTypes,
         value: str | None = None,
         entry: Entry | None = None,
     ):
+        self.name = name
         self.type = type
         self.value = value
 
@@ -71,13 +68,16 @@ class TagBoxField(Base):
     entry: Mapped[Entry] = relationship()
 
     tags: Mapped[set[Tag]] = relationship(secondary=tag_fields)
+    name: Mapped[str]
 
     def __init__(
         self,
-        tags: set[Tag],
+        name: str,
+        tags: set[Tag] = set(),
         entry: Entry | None = None,
         type: TagBoxTypes = TagBoxTypes.tag_box,
     ):
+        self.name = name
         self.tags = tags
         self.type = type
 
@@ -95,14 +95,17 @@ class DatetimeField(Base):
     entry_id: Mapped[int] = mapped_column(ForeignKey("entries.id"))
     entry: Mapped[Entry] = relationship()
 
-    value: Mapped[datetime.datetime]
+    value: Mapped[datetime.datetime | None]
+    name: Mapped[str]
 
     def __init__(
         self,
-        value: datetime.datetime,
-        type: DateTimeTypes,
+        name: str,
+        value: datetime.datetime | None = None,
         entry: Entry | None = None,
+        type: DateTimeTypes = DateTimeTypes.datetime,
     ):
+        self.name = name
         self.type = type
         self.value = value
 

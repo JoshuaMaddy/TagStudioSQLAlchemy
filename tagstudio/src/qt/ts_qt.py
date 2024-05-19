@@ -15,98 +15,82 @@ import sys
 import time
 import typing
 import webbrowser
+from argparse import Namespace
 from datetime import datetime as dt
+from itertools import batched
 from pathlib import Path
 from queue import Queue
-from typing import Optional
+from signal import Signals
+from typing import Any, Callable
 
+from humanfriendly import format_timespan
 from PIL import Image
 from PySide6 import QtCore
-from PySide6.QtCore import QObject, QThread, Signal, Qt, QThreadPool, QTimer, QSettings
+from PySide6.QtCore import QObject, QSettings, Qt, QThread, QThreadPool, QTimer, Signal
 from PySide6.QtGui import (
-    QGuiApplication,
-    QPixmap,
-    QMouseEvent,
-    QColor,
     QAction,
+    QColor,
     QFontDatabase,
+    QGuiApplication,
     QIcon,
+    QMouseEvent,
+    QPixmap,
 )
 from PySide6.QtUiTools import QUiLoader
 from PySide6.QtWidgets import (
     QApplication,
-    QWidget,
-    QHBoxLayout,
-    QPushButton,
-    QLineEdit,
-    QScrollArea,
     QFileDialog,
-    QSplashScreen,
+    QLineEdit,
     QMenu,
     QMenuBar,
+    QPushButton,
+    QScrollArea,
+    QSplashScreen,
+    QSplitter,
+    QWidget,
 )
-from humanfriendly import format_timespan
-
-from src.core.enums import SettingItems
-from src.core.library import ItemType
-from src.core.ts_core import (
-    PLAINTEXT_TYPES,
-    TagStudioCore,
-    TAG_COLORS,
-    DATE_FIELDS,
-    TEXT_FIELDS,
-    BOX_FIELDS,
-    ALL_FILE_TYPES,
-    SHORTCUT_TYPES,
-    PROGRAM_TYPES,
-    ARCHIVE_TYPES,
-    PRESENTATION_TYPES,
-    SPREADSHEET_TYPES,
-    DOC_TYPES,
-    AUDIO_TYPES,
-    VIDEO_TYPES,
-    IMAGE_TYPES,
-    LIBRARY_FILENAME,
+from src.alt_core.library import ItemType
+from src.alt_core.ts_core import (
     COLLAGE_FOLDER_NAME,
-    BACKUP_FOLDER_NAME,
     TS_FOLDER_NAME,
-    VERSION_BRANCH,
     VERSION,
+    VERSION_BRANCH,
+    TagStudioCore,
 )
+from src.alt_core.types import Frame, Frames, SettingItems
 from src.core.utils.web import strip_web_protocol
 from src.qt.flowlayout import FlowLayout
-from src.qt.main_window import Ui_MainWindow
-from src.qt.helpers.function_iterator import FunctionIterator
 from src.qt.helpers.custom_runnable import CustomRunnable
-from src.qt.widgets.collage_icon import CollageIconRenderer
-from src.qt.widgets.panel import PanelModal
-from src.qt.widgets.thumb_renderer import ThumbRenderer
-from src.qt.widgets.progress import ProgressWidget
-from src.qt.widgets.preview_panel import PreviewPanel
-from src.qt.widgets.item_thumb import ItemThumb
+from src.qt.helpers.function_iterator import FunctionIterator
+from src.qt.main_window import Ui_MainWindow
 from src.qt.modals.build_tag import BuildTagPanel
-from src.qt.modals.tag_database import TagDatabasePanel
 from src.qt.modals.file_extension import FileExtensionModal
-from src.qt.modals.fix_unlinked import FixUnlinkedEntriesModal
 from src.qt.modals.fix_dupes import FixDupeFilesModal
+from src.qt.modals.fix_unlinked import FixUnlinkedEntriesModal
 from src.qt.modals.folders_to_tags import FoldersToTagsModal
+from src.qt.modals.tag_database import TagDatabasePanel
+from src.qt.widgets.collage_icon import CollageIconRenderer
+from src.qt.widgets.item_thumb import ItemThumb
+from src.qt.widgets.panel import PanelModal
+from src.qt.widgets.preview_panel import PreviewPanel
+from src.qt.widgets.progress import ProgressWidget
+from src.qt.widgets.thumb_renderer import ThumbRenderer
 
 # this import has side-effect of import PySide resources
-import src.qt.resources_rc  # pylint: disable=unused-import
 
 # SIGQUIT is not defined on Windows
 if sys.platform == "win32":
-    from signal import signal, SIGINT, SIGTERM
+    from signal import SIGINT, SIGTERM, signal
 
     SIGQUIT = SIGTERM
 else:
-    from signal import signal, SIGINT, SIGTERM, SIGQUIT
+    from signal import SIGINT, SIGQUIT, SIGTERM, signal
 
-ERROR = f"[ERROR]"
-WARNING = f"[WARNING]"
-INFO = f"[INFO]"
+ERROR = "[ERROR]"
+WARNING = "[WARNING]"
+INFO = "[INFO]"
 
-logging.basicConfig(format="%(message)s", level=logging.INFO)
+logging.basicConfig(format="%(message)s", level=logging.DEBUG)
 
 
 class NavigationState:
@@ -114,13 +98,13 @@ class NavigationState:
 
     def __init__(
         self,
-        contents,
+        contents: Frame,
         scrollbar_pos: int,
         page_index: int,
         page_count: int,
         search_text: str | None = None,
-        thumb_size=None,
-        spacing=None,
+        thumb_size: int | None = None,
+        spacing: int | None = None,
     ) -> None:
         self.contents = contents
         self.scrollbar_pos = scrollbar_pos
@@ -134,7 +118,7 @@ class NavigationState:
 class Consumer(QThread):
     MARKER_QUIT = "MARKER_QUIT"
 
-    def __init__(self, queue) -> None:
+    def __init__(self, queue: Queue[Any]) -> None:
         self.queue = queue
         QThread.__init__(self)
 
@@ -168,27 +152,23 @@ class QtDriver(QObject):
 
     preview_panel: PreviewPanel
 
-    def __init__(self, core: TagStudioCore, args):
+    def __init__(self, core: TagStudioCore, args: Namespace):
         super().__init__()
         self.core: TagStudioCore = core
         self.lib = self.core.lib
         self.args = args
-        self.frame_dict: dict = {}
+        self.frame_dict: dict[str, Frames] = {}
         self.nav_frames: list[NavigationState] = []
         self.cur_frame_idx: int = -1
 
-        # self.main_window = None
-        # self.main_window = Ui_MainWindow()
-
         self.branch: str = (" (" + VERSION_BRANCH + ")") if VERSION_BRANCH else ""
         self.base_title: str = f"TagStudio Alpha {VERSION}{self.branch}"
-        # self.title_text: str = self.base_title
-        # self.buffer = {}
-        self.thumb_job_queue: Queue = Queue()
+
+        self.thumb_job_queue: Queue[Any] = Queue()
         self.thumb_threads: list[Consumer] = []
         self.thumb_cutoff: float = time.time()
-        # self.selected: list[tuple[int,int]] = [] # (Thumb Index, Page Index)
-        self.selected: list[tuple[ItemType, int]] = []  # (Item Type, Item ID)
+
+        self.selected: list[tuple[ItemType, int]] = []
 
         self.SIGTERM.connect(self.handleSIGTERM)
 
@@ -211,13 +191,12 @@ class QtDriver(QObject):
                 f"[QT DRIVER] Config File not specified, defaulting to {self.settings.fileName()}"
             )
 
-        max_threads = os.cpu_count()
+        max_threads = os.cpu_count() or 1
+
         if args.ci:
-            # spawn only single worker in CI environment
             max_threads = 1
+
         for i in range(max_threads):
-            # thread = threading.Thread(target=self.consumer, name=f'ThumbRenderer_{i}',args=(), daemon=True)
-            # thread.start()
             thread = Consumer(self.thumb_job_queue)
             thread.setObjectName(f"ThumbRenderer_{i}")
             self.thumb_threads.append(thread)
@@ -225,19 +204,22 @@ class QtDriver(QObject):
 
     def open_library_from_dialog(self):
         dir = QFileDialog.getExistingDirectory(
-            None, "Open/Create Library", "/", QFileDialog.ShowDirsOnly
+            parent=None,
+            caption="Open/Create Library",
+            dir="/",
+            options=QFileDialog.Option.ShowDirsOnly,
         )
         if dir not in (None, ""):
             self.open_library(dir)
 
-    def signal_handler(self, sig, frame):
+    def signal_handler(self, sig: Signals):
         if sig in (SIGINT, SIGTERM, SIGQUIT):
             self.SIGTERM.emit()
 
     def setup_signals(self):
-        signal(SIGINT, self.signal_handler)
-        signal(SIGTERM, self.signal_handler)
-        signal(SIGQUIT, self.signal_handler)
+        signal(SIGINT, self.signal_handler)  # type: ignore
+        signal(SIGTERM, self.signal_handler)  # type: ignore
+        signal(SIGQUIT, self.signal_handler)  # type: ignore
 
     def start(self) -> None:
         """Launches the main Qt window."""
@@ -247,12 +229,6 @@ class QtDriver(QObject):
             sys.argv += ["-platform", "windows:darkmode=2"]
         app = QApplication(sys.argv)
         app.setStyle("Fusion")
-        # pal: QPalette = app.palette()
-        # pal.setColor(QPalette.ColorGroup.Active,
-        # 			 QPalette.ColorRole.Highlight, QColor('#6E4BCE'))
-        # pal.setColor(QPalette.ColorGroup.Normal,
-        # 			 QPalette.ColorRole.Window, QColor('#110F1B'))
-        # app.setPalette(pal)
         home_path = os.path.normpath(f"{Path(__file__).parent}/ui/home.ui")
         icon_path = os.path.normpath(f"{Path(__file__).parents[2]}/resources/icon.png")
 
@@ -263,27 +239,13 @@ class QtDriver(QObject):
         timer.start(500)
         timer.timeout.connect(lambda: None)
 
-        # self.main_window = loader.load(home_path)
         self.main_window = Ui_MainWindow()
         self.main_window.setWindowTitle(self.base_title)
         self.main_window.mousePressEvent = self.mouse_navigation  # type: ignore
-        # self.main_window.setStyleSheet(
-        # 	f'QScrollBar::{{background:red;}}'
-        # 	)
-
-        # # self.main_window.windowFlags() &
-        # # self.main_window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        # self.main_window.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
-        # self.main_window.setWindowFlag(Qt.WindowType.WindowTransparentForInput, False)
-        # self.main_window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-        # self.windowFX = WindowEffect()
-        # self.windowFX.setAcrylicEffect(self.main_window.winId())
 
         splash_pixmap = QPixmap(":/images/splash.png")
         splash_pixmap.setDevicePixelRatio(self.main_window.devicePixelRatio())
         self.splash = QSplashScreen(splash_pixmap, Qt.WindowStaysOnTopHint)  # type: ignore
-        # self.splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.splash.show()
 
         if os.name == "nt":
@@ -307,9 +269,6 @@ class QtDriver(QObject):
         help_menu = QMenu("&Help", menu_bar)
 
         # File Menu ============================================================
-        # file_menu.addAction(QAction('&New Library', menu_bar))
-        # file_menu.addAction(QAction('&Open Library', menu_bar))
-
         open_library_action = QAction("&Open/Create Library", menu_bar)
         open_library_action.triggered.connect(lambda: self.open_library_from_dialog())
         open_library_action.setShortcut(
@@ -319,11 +278,11 @@ class QtDriver(QObject):
             )
         )
         open_library_action.setToolTip("Ctrl+O")
-        file_menu.addAction(open_library_action)
+        file_menu.addAction(open_library_action)  # type: ignore
 
         save_library_action = QAction("&Save Library", menu_bar)
         save_library_action.triggered.connect(
-            lambda: self.callback_library_needed_check(self.save_library)
+            lambda: self.callback_library_needed_check(self.save_library)  # type: ignore
         )
         save_library_action.setShortcut(
             QtCore.QKeyCombination(
@@ -332,11 +291,11 @@ class QtDriver(QObject):
             )
         )
         save_library_action.setStatusTip("Ctrl+S")
-        file_menu.addAction(save_library_action)
+        file_menu.addAction(save_library_action)  # type: ignore
 
         save_library_backup_action = QAction("&Save Library Backup", menu_bar)
         save_library_backup_action.triggered.connect(
-            lambda: self.callback_library_needed_check(self.backup_library)
+            lambda: self.callback_library_needed_check(self.backup_library)  # type: ignore
         )
         save_library_backup_action.setShortcut(
             QtCore.QKeyCombination(
@@ -348,15 +307,13 @@ class QtDriver(QObject):
             )
         )
         save_library_backup_action.setStatusTip("Ctrl+Shift+S")
-        file_menu.addAction(save_library_backup_action)
+        file_menu.addAction(save_library_backup_action)  # type: ignore
 
         file_menu.addSeparator()
 
-        # refresh_lib_action = QAction('&Refresh Directories', self.main_window)
-        # refresh_lib_action.triggered.connect(lambda: self.lib.refresh_dir())
         add_new_files_action = QAction("&Refresh Directories", menu_bar)
         add_new_files_action.triggered.connect(
-            lambda: self.callback_library_needed_check(self.add_new_files_callback)
+            lambda: self.callback_library_needed_check(self.add_new_files_callback)  # type: ignore
         )
         add_new_files_action.setShortcut(
             QtCore.QKeyCombination(
@@ -365,14 +322,13 @@ class QtDriver(QObject):
             )
         )
         add_new_files_action.setStatusTip("Ctrl+R")
-        # file_menu.addAction(refresh_lib_action)
-        file_menu.addAction(add_new_files_action)
+        file_menu.addAction(add_new_files_action)  # type: ignore
 
         file_menu.addSeparator()
 
         close_library_action = QAction("&Close Library", menu_bar)
         close_library_action.triggered.connect(lambda: self.close_library())
-        file_menu.addAction(close_library_action)
+        file_menu.addAction(close_library_action)  # type: ignore
 
         # Edit Menu ============================================================
         new_tag_action = QAction("New &Tag", menu_bar)
@@ -384,7 +340,7 @@ class QtDriver(QObject):
             )
         )
         new_tag_action.setToolTip("Ctrl+T")
-        edit_menu.addAction(new_tag_action)
+        edit_menu.addAction(new_tag_action)  # type: ignore
 
         edit_menu.addSeparator()
 
@@ -392,11 +348,11 @@ class QtDriver(QObject):
         manage_file_extensions_action.triggered.connect(
             lambda: self.show_file_extension_modal()
         )
-        edit_menu.addAction(manage_file_extensions_action)
+        edit_menu.addAction(manage_file_extensions_action)  # type: ignore
 
         tag_database_action = QAction("Manage Tags", menu_bar)
         tag_database_action.triggered.connect(lambda: self.show_tag_database())
-        edit_menu.addAction(tag_database_action)
+        edit_menu.addAction(tag_database_action)  # type: ignore
 
         check_action = QAction("Open library on start", self)
         check_action.setCheckable(True)
@@ -406,24 +362,24 @@ class QtDriver(QObject):
         check_action.triggered.connect(
             lambda checked: self.settings.setValue(
                 SettingItems.START_LOAD_LAST, checked
-            )
+            )  # type: ignore
         )
-        window_menu.addAction(check_action)
+        window_menu.addAction(check_action)  # type: ignore
 
         # Tools Menu ===========================================================
         fix_unlinked_entries_action = QAction("Fix &Unlinked Entries", menu_bar)
         fue_modal = FixUnlinkedEntriesModal(self.lib, self)
         fix_unlinked_entries_action.triggered.connect(lambda: fue_modal.show())
-        tools_menu.addAction(fix_unlinked_entries_action)
+        tools_menu.addAction(fix_unlinked_entries_action)  # type: ignore
 
         fix_dupe_files_action = QAction("Fix Duplicate &Files", menu_bar)
         fdf_modal = FixDupeFilesModal(self.lib, self)
         fix_dupe_files_action.triggered.connect(lambda: fdf_modal.show())
-        tools_menu.addAction(fix_dupe_files_action)
+        tools_menu.addAction(fix_dupe_files_action)  # type: ignore
 
         create_collage_action = QAction("Create Collage", menu_bar)
         create_collage_action.triggered.connect(lambda: self.create_collage())
-        tools_menu.addAction(create_collage_action)
+        tools_menu.addAction(create_collage_action)  # type: ignore
 
         # Macros Menu ==========================================================
         self.autofill_action = QAction("Autofill", menu_bar)
@@ -435,7 +391,7 @@ class QtDriver(QObject):
                 self.preview_panel.update_widgets(),
             )
         )
-        macros_menu.addAction(self.autofill_action)
+        macros_menu.addAction(self.autofill_action)  # type: ignore
 
         self.sort_fields_action = QAction("&Sort Fields", menu_bar)
         self.sort_fields_action.triggered.connect(
@@ -454,7 +410,7 @@ class QtDriver(QObject):
             )
         )
         self.sort_fields_action.setToolTip("Alt+S")
-        macros_menu.addAction(self.sort_fields_action)
+        macros_menu.addAction(self.sort_fields_action)  # type: ignore
 
         show_libs_list_action = QAction("Show Recent Libraries", menu_bar)
         show_libs_list_action.setCheckable(True)
@@ -462,24 +418,24 @@ class QtDriver(QObject):
             self.settings.value(SettingItems.WINDOW_SHOW_LIBS, True, type=bool)  # type: ignore
         )
         show_libs_list_action.triggered.connect(
-            lambda checked: (
+            lambda checked: (  # type: ignore
                 self.settings.setValue(SettingItems.WINDOW_SHOW_LIBS, checked),  # type: ignore
-                self.toggle_libs_list(checked),
-            )
+                self.toggle_libs_list(checked),  # type: ignore
+            )  # type: ignore
         )
-        window_menu.addAction(show_libs_list_action)
+        window_menu.addAction(show_libs_list_action)  # type: ignore
 
         folders_to_tags_action = QAction("Folders to Tags", menu_bar)
         ftt_modal = FoldersToTagsModal(self.lib, self)
         folders_to_tags_action.triggered.connect(lambda: ftt_modal.show())
-        macros_menu.addAction(folders_to_tags_action)
+        macros_menu.addAction(folders_to_tags_action)  # type: ignore
 
         # Help Menu ==========================================================
         self.repo_action = QAction("Visit GitHub Repository", menu_bar)
         self.repo_action.triggered.connect(
             lambda: webbrowser.open("https://github.com/TagStudioDev/TagStudio")
         )
-        help_menu.addAction(self.repo_action)
+        help_menu.addAction(self.repo_action)  # type: ignore
 
         self.set_macro_menu_viability()
 
@@ -491,8 +447,8 @@ class QtDriver(QObject):
         menu_bar.addMenu(help_menu)
 
         self.preview_panel = PreviewPanel(self.lib, self)
-        l: QHBoxLayout = self.main_window.splitter
-        l.addWidget(self.preview_panel)
+        layout: QSplitter = self.main_window.splitter
+        layout.addWidget(self.preview_panel)
 
         QFontDatabase.addApplicationFont(
             os.path.normpath(
@@ -521,10 +477,6 @@ class QtDriver(QObject):
                 QColor("#9782ff"),
             )
             self.open_library(lib)
-
-        if self.args.ci:
-            # gracefully terminate the app in CI environment
-            self.thumb_job_queue.put((self.SIGTERM.emit, []))
 
         app.exec()
 
@@ -555,13 +507,14 @@ class QtDriver(QObject):
 
         self.frame_dict = {}
         self.main_window.pagination.index.connect(
-            lambda i: (
+            lambda index: (  # type: ignore
                 self.nav_forward(
                     *self.get_frame_contents(
-                        i, self.nav_frames[self.cur_frame_idx].search_text
+                        index,  # type: ignore
+                        self.nav_frames[self.cur_frame_idx].search_text,  # type: ignore
                     )
                 ),
-                logging.info(f"emitted {i}"),
+                logging.info(f"Emitted {index}"),
             )
         )
 
@@ -590,9 +543,9 @@ class QtDriver(QObject):
             self.preview_panel.libs_flow_container.hide()
         self.preview_panel.update()
 
-    def callback_library_needed_check(self, func):
+    def callback_library_needed_check(self, func: Callable[[], None]):
         """Check if loaded library has valid path before executing the button function"""
-        if self.lib.library_dir:
+        if self.lib.root_path:
             func()
 
     def handleSIGTERM(self):
@@ -600,9 +553,8 @@ class QtDriver(QObject):
 
     def shutdown(self):
         """Save Library on Application Exit"""
-        if self.lib.library_dir:
-            self.save_library()
-            self.settings.setValue(SettingItems.LAST_LIBRARY, self.lib.library_dir)
+        if self.lib.root_path:
+            self.settings.setValue(SettingItems.LAST_LIBRARY, self.lib.root_path)
             self.settings.sync()
         logging.info("[SHUTDOWN] Ending Thumbnail Threads...")
         for _ in self.thumb_threads:
@@ -615,43 +567,12 @@ class QtDriver(QObject):
 
         QApplication.quit()
 
-    def save_library(self, show_status=True):
-        logging.info(f"Saving Library...")
-        if show_status:
-            self.main_window.statusbar.showMessage(f"Saving Library...")
-            start_time = time.time()
-        # This might still be able to error, if the selected directory deletes in a race condition
-        # or something silly like that. Hence the loop, but if this is considered overkill, thats fair.
-        while True:
-            try:
-                self.lib.save_library_to_disk()
-                break
-                # If the parent directory got moved, or deleted, prompt user for where to save.
-            except FileNotFoundError:
-                logging.info(
-                    "Library parent directory not found, prompting user to select the directory"
-                )
-                dir = QFileDialog.getExistingDirectory(
-                    None,
-                    "Library Location not found, please select location to save Library",
-                    "/",
-                    QFileDialog.ShowDirsOnly,
-                )
-                if dir not in (None, ""):
-                    self.lib.library_dir = dir
-        if show_status:
-            end_time = time.time()
-            self.main_window.statusbar.showMessage(
-                f"Library Saved! ({format_timespan(end_time - start_time)})"
-            )
-
     def close_library(self):
-        if self.lib.library_dir:
-            logging.info(f"Closing Library...")
-            self.main_window.statusbar.showMessage(f"Closing & Saving Library...")
+        if self.lib.root_path:
+            logging.info("Closing Library...")
+            self.main_window.statusbar.showMessage("Closing & Saving Library...")
             start_time = time.time()
-            self.save_library(show_status=False)
-            self.settings.setValue(SettingItems.LAST_LIBRARY, self.lib.library_dir)
+            self.settings.setValue(SettingItems.LAST_LIBRARY, self.lib.root_path)
             self.settings.sync()
 
             self.lib.clear_internal_vars()
@@ -670,26 +591,18 @@ class QtDriver(QObject):
                 f"Library Saved and Closed! ({format_timespan(end_time - start_time)})"
             )
 
+    # TODO
     def backup_library(self):
-        logging.info(f"Backing Up Library...")
-        self.main_window.statusbar.showMessage(f"Saving Library...")
-        start_time = time.time()
-        fn = self.lib.save_library_backup_to_disk()
-        end_time = time.time()
-        self.main_window.statusbar.showMessage(
-            f'Library Backup Saved at: "{os.path.normpath(os.path.normpath(f"{self.lib.library_dir}/{TS_FOLDER_NAME}/{BACKUP_FOLDER_NAME}/{fn}"))}" ({format_timespan(end_time - start_time)})'
-        )
+        logging.info("Backing Up Library...")
 
     def add_tag_action_callback(self):
         self.modal = PanelModal(
             BuildTagPanel(self.lib), "New Tag", "Add Tag", has_save=True
         )
-        # self.edit_modal.widget.update_display_name.connect(lambda t: self.edit_modal.title_widget.setText(t))
         panel: BuildTagPanel = self.modal.widget
         self.modal.saved.connect(
             lambda: (self.lib.add_tag_to_library(panel.build_tag()), self.modal.hide())
         )
-        # panel.tag_updated.connect(lambda tag: self.lib.update_tag(tag))
         self.modal.show()
 
     def show_tag_database(self):
@@ -709,135 +622,32 @@ class QtDriver(QObject):
 
     def add_new_files_callback(self):
         """Runs when user initiates adding new files to the Library."""
-        # # if self.lib.files_not_in_library:
-        # # 	mb = QMessageBox()
-        # # 	mb.setText(f'Would you like to refresh the directory before adding {len(self.lib.files_not_in_library)} new files to the library?\nThis will add any additional files that have been moved to the directory since the last refresh.')
-        # # 	mb.setWindowTitle('Refresh Library')
-        # # 	mb.setIcon(QMessageBox.Icon.Information)
-        # # 	mb.setStandardButtons(QMessageBox.StandardButton.No)
-        # # 	refresh_button = mb.addButton('Refresh', QMessageBox.ButtonRole.AcceptRole)
-        # # 	mb.setDefaultButton(refresh_button)
-        # # 	result = mb.exec_()
-        # # 	# logging.info(result)
-        # # 	if result == 0:
-        # # 		self.main_window.statusbar.showMessage(f'Refreshing Library...', 3)
-        # # 		self.lib.refresh_dir()
-        # # else:
-        # pb = QProgressDialog('Scanning Directories for New Files...\nPreparing...', None, 0,0)
-
-        # pb.setFixedSize(432, 112)
-        # pb.setWindowFlags(pb.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
-        # # pb.setLabelText('Scanning Directories...')
-        # pb.setWindowTitle('Scanning Directories')
-        # pb.setWindowModality(Qt.WindowModality.ApplicationModal)
-        # # pb.setMinimum(0)
-        # # pb.setMaximum(0)
-        # # pb.setValue(0)
-        # pb.show()
-        # self.main_window.statusbar.showMessage(f'Refreshing Library...', 3)
-        # # self.lib.refresh_dir()
-        # r = CustomRunnable(lambda: self.runnable(pb))
-        # logging.info(f'Main: {QThread.currentThread()}')
-        # r.done.connect(lambda: (pb.hide(), pb.deleteLater(), self.add_new_files_runnable()))
-        # QThreadPool.globalInstance().start(r)
-        # # r.run()
-
-        # # new_ids: list[int] = self.lib.add_new_files_as_entries()
-        # # # logging.info(f'{INFO} Running configured Macros on {len(new_ids)} new Entries...')
-        # # # self.main_window.statusbar.showMessage(f'Running configured Macros on {len(new_ids)} new Entries...', 3)
-        # # # for id in new_ids:
-        # # # 	self.run_macro('autofill', id)
-
-        # # self.main_window.statusbar.showMessage('', 3)
-        # # self.filter_entries('')
 
         iterator = FunctionIterator(self.lib.refresh_dir)
-        pw = ProgressWidget(
+        progress_widget = ProgressWidget(
             window_title="Refreshing Directories",
             label_text="Scanning Directories for New Files...\nPreparing...",
             cancel_button_text=None,
             minimum=0,
             maximum=0,
         )
-        pw.show()
-        iterator.value.connect(lambda x: pw.update_progress(x + 1))
+        progress_widget.show()
+        iterator.value.connect(lambda x: progress_widget.update_progress(x + 1))  # type: ignore
         iterator.value.connect(
-            lambda x: pw.update_label(
+            lambda x: progress_widget.update_label(  # type: ignore
                 f'Scanning Directories for New Files...\n{x + 1} File{"s" if x + 1 != 1 else ""} Searched, {len(self.lib.files_not_in_library)} New Files Found'
             )
         )
-        r = CustomRunnable(lambda: iterator.run())
-        # r.done.connect(lambda: (pw.hide(), pw.deleteLater(), self.filter_items('')))
-        # vvv This one runs the macros when adding new files to the library.
-        r.done.connect(
-            lambda: (pw.hide(), pw.deleteLater(), self.add_new_files_runnable())
-        )
-        QThreadPool.globalInstance().start(r)
 
-    # def runnable(self, pb:QProgressDialog):
-    # 	for i in self.lib.refresh_dir():
-    # 		pb.setLabelText(f'Scanning Directories for New Files...\n{i} File{"s" if i != 1 else ""} Searched, {len(self.lib.files_not_in_library)} New Files Found')
-
-    def add_new_files_runnable(self):
-        """
-        Threaded method that adds any known new files to the library and
-        initiates running default macros on them.
-        """
-        # logging.info(f'Start ANF: {QThread.currentThread()}')
-        new_ids: list[int] = self.lib.add_new_files_as_entries()
-        # pb = QProgressDialog(f'Running Configured Macros on 1/{len(new_ids)} New Entries', None, 0,len(new_ids))
-        # pb.setFixedSize(432, 112)
-        # pb.setWindowFlags(pb.windowFlags() & ~Qt.WindowType.WindowCloseButtonHint)
-        # pb.setWindowTitle('Running Macros')
-        # pb.setWindowModality(Qt.WindowModality.ApplicationModal)
-        # pb.show()
-
-        # r = CustomRunnable(lambda: self.new_file_macros_runnable(pb, new_ids))
-        # r.done.connect(lambda: (pb.hide(), pb.deleteLater(), self.filter_items('')))
-        # r.run()
-        # # QThreadPool.globalInstance().start(r)
-
-        # # logging.info(f'{INFO} Running configured Macros on {len(new_ids)} new Entries...')
-        # # self.main_window.statusbar.showMessage(f'Running configured Macros on {len(new_ids)} new Entries...', 3)
-
-        # # pb.hide()
-
-        iterator = FunctionIterator(lambda: self.new_file_macros_runnable(new_ids))
-        pw = ProgressWidget(
-            window_title="Running Macros on New Entries",
-            label_text=f"Running Configured Macros on 1/{len(new_ids)} New Entries",
-            cancel_button_text=None,
-            minimum=0,
-            maximum=0,
-        )
-        pw.show()
-        iterator.value.connect(lambda x: pw.update_progress(x + 1))
-        iterator.value.connect(
-            lambda x: pw.update_label(
-                f"Running Configured Macros on {x + 1}/{len(new_ids)} New Entries"
+        runable = CustomRunnable(lambda: iterator.run())
+        runable.done.connect(
+            lambda: (
+                progress_widget.hide(),
+                progress_widget.deleteLater(),
+                self.filter_items(),
             )
-        )
-        r = CustomRunnable(lambda: iterator.run())
-        r.done.connect(lambda: (pw.hide(), pw.deleteLater(), self.filter_items("")))
-        QThreadPool.globalInstance().start(r)
-
-    def new_file_macros_runnable(self, new_ids):
-        """Threaded method that runs macros on a set of Entry IDs."""
-        # sleep(1)
-        # logging.info(f'ANFR: {QThread.currentThread()}')
-        # for i, id in enumerate(new_ids):
-        # 	# pb.setValue(i)
-        # 	# pb.setLabelText(f'Running Configured Macros on {i}/{len(new_ids)} New Entries')
-        # 	# self.run_macro('autofill', id)
-
-        # NOTE: I don't know. I don't know why it needs this. The whole program
-        # falls apart if this method doesn't run, and it DOESN'T DO ANYTHING
-        yield 0
-
-        # self.main_window.statusbar.showMessage('', 3)
-
-        # sleep(5)
-        # pb.deleteLater()
+        )  # type: ignore
+        QThreadPool.globalInstance().start(runable)  # type: ignore
 
     def run_macros(self, name: str, entry_ids: list[int]):
         """Runs a specific Macro on a group of given entry_ids."""
@@ -847,7 +657,7 @@ class QtDriver(QObject):
     def run_macro(self, name: str, entry_id: int):
         """Runs a specific Macro on an Entry given a Macro name."""
         entry = self.lib.get_entry(entry_id)
-        path = os.path.normpath(f"{self.lib.library_dir}/{entry.path}/{entry.filename}")
+        path = os.path.normpath(f"{self.lib.root_path}/{entry.path}/{entry.filename}")
         source = path.split(os.sep)[1].lower()
         if name == "sidecar":
             self.lib.add_generic_data_to_entry(
@@ -901,7 +711,7 @@ class QtDriver(QObject):
 
     def nav_forward(
         self,
-        frame_content: Optional[list[tuple[ItemType, int]]] = None,
+        frame_content: Frame | None = None,
         page_index: int = 0,
         page_count: int = 0,
     ):
@@ -932,7 +742,11 @@ class QtDriver(QObject):
                     trimmed = True
                 self.nav_frames.append(
                     NavigationState(
-                        frame_content, 0, page_index, page_count, search_text
+                        contents=frame_content,
+                        scrollbar_pos=0,
+                        page_index=page_index,
+                        page_count=page_count,
+                        search_text=search_text,
                     )
                 )
                 # logging.info(f'Saving Text: {search_text}')
@@ -959,21 +773,13 @@ class QtDriver(QObject):
                 self.nav_frames[self.cur_frame_idx].scrollbar_pos
             )
             self.main_window.searchField.setText(
-                self.nav_frames[self.cur_frame_idx].search_text
+                self.nav_frames[self.cur_frame_idx].search_text or ""
             )
             self.main_window.pagination.update_buttons(
                 self.nav_frames[self.cur_frame_idx].page_count,
                 self.nav_frames[self.cur_frame_idx].page_index,
                 emit=False,
             )
-            # logging.info(f'Setting Text: {self.nav_stack[self.cur_page_idx].search_text}')
-        # else:
-        # 	self.nav_stack.pop()
-        # 	self.cur_page_idx -= 1
-        # 	self.update_thumbs()
-        # 	sb.verticalScrollBar().setValue(self.nav_stack[self.cur_page_idx].scrollbar_pos)
-
-        # logging.info(f'Forward: {[len(x.contents) for x in self.nav_stack]}, Index {self.cur_page_idx}, SB {self.nav_stack[self.cur_page_idx].scrollbar_pos}')
 
     def nav_back(self):
         """Navigates a step backwards in the navigation stack."""
@@ -998,12 +804,10 @@ class QtDriver(QObject):
                     self.nav_frames[self.cur_frame_idx].page_index,
                     emit=False,
                 )
-                # logging.info(f'Setting Text: {self.nav_stack[self.cur_page_idx].search_text}')
-        # logging.info(f'Back: {[len(x.contents) for x in self.nav_stack]}, Index {self.cur_page_idx}, SB {self.nav_stack[self.cur_page_idx].scrollbar_pos}')
 
     def refresh_frame(
         self,
-        frame_content: list[tuple[ItemType, int]],
+        frame_content: Frame,
         page_index: int = 0,
         page_count: int = 0,
     ):
@@ -1013,14 +817,18 @@ class QtDriver(QObject):
         """
         if self.nav_frames:
             self.nav_frames[self.cur_frame_idx] = NavigationState(
-                frame_content,
-                0,
-                self.nav_frames[self.cur_frame_idx].page_index,
-                self.nav_frames[self.cur_frame_idx].page_count,
-                self.main_window.searchField.text(),
+                contents=frame_content,
+                scrollbar_pos=0,
+                page_index=self.nav_frames[self.cur_frame_idx].page_index,
+                page_count=self.nav_frames[self.cur_frame_idx].page_count,
+                search_text=self.main_window.searchField.text(),
             )
         else:
-            self.nav_forward(frame_content, page_index, page_count)
+            self.nav_forward(
+                content=frame_content,
+                page_index=page_index,
+                page_count=page_count,
+            )
         self.update_thumbs()
         # logging.info(f'Refresh: {[len(x.contents) for x in self.nav_stack]}, Index {self.cur_page_idx}')
 
@@ -1115,13 +923,8 @@ class QtDriver(QObject):
                         if ((c_type, c_id)) not in self.selected:
                             self.selected.append((c_type, c_id))
         else:
-            # for i in self.selected:
-            # 	if i[1] == self.cur_frame_idx:
-            # 		self.item_thumbs[i[0]].thumb_button.set_selected(False)
             self.selected.clear()
-            # self.selected.append((thumb_index, page_index))
             self.selected.append((type, id))
-            # self.item_thumbs[thumb_index].thumb_button.set_selected(True)
             for it in self.item_thumbs:
                 if it.mode == type and it.item_id == id:
                     it.thumb_button.set_selected(True)
@@ -1150,8 +953,6 @@ class QtDriver(QObject):
 
     def update_thumbs(self):
         """Updates search thumbnails."""
-        # start_time = time.time()
-        # logging.info(f'Current Page: {self.cur_page_idx}, Stack Length:{len(self.nav_stack)}')
         with self.thumb_job_queue.mutex:
             # Cancels all thumb jobs waiting to be started
             self.thumb_job_queue.queue.clear()
@@ -1163,138 +964,108 @@ class QtDriver(QObject):
         ratio: float = self.main_window.devicePixelRatio()
         base_size: tuple[int, int] = (self.thumb_size, self.thumb_size)
 
-        for i, item_thumb in enumerate(self.item_thumbs, start=0):
+        limited_thumbs = self.item_thumbs[
+            : len(self.nav_frames[self.cur_frame_idx].contents)
+        ]
+        for i, item_thumb in enumerate(limited_thumbs):
             if i < len(self.nav_frames[self.cur_frame_idx].contents):
-                # Set new item type modes
-                # logging.info(f'[UPDATE] Setting Mode To: {self.nav_stack[self.cur_page_idx].contents[i][0]}')
                 item_thumb.set_mode(self.nav_frames[self.cur_frame_idx].contents[i][0])
                 item_thumb.ignore_size = False
-                # logging.info(f'[UPDATE] Set Mode To: {item.mode}')
-                # Set thumbnails to loading (will always finish if rendering)
                 self.thumb_job_queue.put(
                     (
                         item_thumb.renderer.render,
                         (sys.float_info.max, "", base_size, ratio, True),
                     )
                 )
-                # # Restore Selected Borders
-                # if (item_thumb.mode, item_thumb.item_id) in self.selected:
-                # 	item_thumb.thumb_button.set_selected(True)
-                # else:
-                # 	item_thumb.thumb_button.set_selected(False)
             else:
                 item_thumb.ignore_size = True
                 item_thumb.set_mode(None)
                 item_thumb.set_item_id(-1)
                 item_thumb.thumb_button.set_selected(False)
 
-        # scrollbar: QScrollArea = self.main_window.scrollArea
-        # scrollbar.verticalScrollBar().setValue(scrollbar_pos)
         self.flow_container.layout().update()
         self.main_window.update()
 
-        for i, item_thumb in enumerate(self.item_thumbs, start=0):
-            if i < len(self.nav_frames[self.cur_frame_idx].contents):
-                filepath = ""
-                if self.nav_frames[self.cur_frame_idx].contents[i][0] == ItemType.ENTRY:
-                    entry = self.lib.get_entry(
-                        self.nav_frames[self.cur_frame_idx].contents[i][1]
-                    )
-                    filepath = os.path.normpath(
-                        f"{self.lib.library_dir}/{entry.path}/{entry.filename}"
-                    )
+        for i, item_thumb in enumerate(limited_thumbs):
+            item_type, item_id, path = self.nav_frames[self.cur_frame_idx].contents[i]
 
-                    item_thumb.set_item_id(entry.id)
-                    item_thumb.assign_archived(entry.has_tag(self.lib, 0))
-                    item_thumb.assign_favorite(entry.has_tag(self.lib, 1))
-                    # ctrl_down = True if QGuiApplication.keyboardModifiers() else False
-                    # TODO: Change how this works. The click function
-                    # for collations a few lines down should NOT be allowed during modifier keys.
-                    item_thumb.update_clickable(
-                        clickable=(
-                            lambda checked=False, entry=entry: self.select_item(
-                                ItemType.ENTRY,
-                                entry.id,
-                                append=True
-                                if QGuiApplication.keyboardModifiers()
-                                == Qt.KeyboardModifier.ControlModifier
-                                else False,
-                                bridge=True
-                                if QGuiApplication.keyboardModifiers()
-                                == Qt.KeyboardModifier.ShiftModifier
-                                else False,
-                            )
+            if item_type == ItemType.ENTRY:
+                filepath = self.lib.root_path / path
+
+                item_thumb.set_item_id(item_id)
+                item_thumb.opener.set_filepath(str(filepath))
+
+                # TODO
+                item_thumb.assign_archived(False)
+                item_thumb.assign_favorite(False)
+
+                # ctrl_down = True if QGuiApplication.keyboardModifiers() else False
+                # TODO: Change how this works. The click function
+                # for collations a few lines down should NOT be allowed during modifier keys.
+
+                item_thumb.update_clickable(
+                    clickable=(
+                        lambda checked=False, entry_id=item_id: self.select_item(
+                            type=ItemType.ENTRY,
+                            id=entry_id,
+                            append=True
+                            if QGuiApplication.keyboardModifiers()
+                            == Qt.KeyboardModifier.ControlModifier
+                            else False,
+                            bridge=True
+                            if QGuiApplication.keyboardModifiers()
+                            == Qt.KeyboardModifier.ShiftModifier
+                            else False,
                         )
-                    )
-                    # item_thumb.update_clickable(clickable=(
-                    # 	lambda checked=False, filepath=filepath, entry=entry,
-                    # 		   item_t=item_thumb, i=i, page=self.cur_frame_idx: (
-                    # 		self.preview_panel.update_widgets(entry),
-                    # 		self.select_item(ItemType.ENTRY, entry.id,
-                    # 	append=True if QGuiApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier else False,
-                    # 	bridge=True if QGuiApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier else False))))
-                    # item.dumpObjectTree()
-                elif (
-                    self.nav_frames[self.cur_frame_idx].contents[i][0]
-                    == ItemType.COLLATION
-                ):
-                    collation = self.lib.get_collation(
-                        self.nav_frames[self.cur_frame_idx].contents[i][1]
-                    )
-                    cover_id = (
-                        collation.cover_id
-                        if collation.cover_id >= 0
-                        else collation.e_ids_and_pages[0][0]
-                    )
-                    cover_e = self.lib.get_entry(cover_id)
-                    filepath = os.path.normpath(
-                        f"{self.lib.library_dir}/{cover_e.path}/{cover_e.filename}"
-                    )
-                    item_thumb.set_count(str(len(collation.e_ids_and_pages)))
-                    item_thumb.update_clickable(
-                        clickable=(
-                            lambda checked=False,
-                            filepath=filepath,
-                            entry=cover_e,
-                            collation=collation: (
-                                self.expand_collation(collation.e_ids_and_pages)
-                            )
-                        )
-                    )
-                # item.setHidden(False)
-
-                # Restore Selected Borders
-                if (item_thumb.mode, item_thumb.item_id) in self.selected:
-                    item_thumb.thumb_button.set_selected(True)
-                else:
-                    item_thumb.thumb_button.set_selected(False)
-
-                self.thumb_job_queue.put(
-                    (
-                        item_thumb.renderer.render,
-                        (time.time(), filepath, base_size, ratio, False),
                     )
                 )
-            else:
-                # item.setHidden(True)
-                pass
-                # update_widget_clickable(widget=item.bg_button, clickable=())
-                # self.thumb_job_queue.put(
-                # 	(item.renderer.render, ('', base_size, ratio, False)))
+            elif item_type == ItemType.COLLATION:
+                collation = self.lib.get_collation(
+                    self.nav_frames[self.cur_frame_idx].contents[i][1]
+                )
+                cover_id = (
+                    collation.cover_id
+                    if collation.cover_id >= 0
+                    else collation.e_ids_and_pages[0][0]
+                )
+                cover_e = self.lib.get_entry(cover_id)
+                filepath = os.path.normpath(
+                    f"{self.lib.root_path}/{cover_e.path}/{cover_e.filename}"
+                )
+                item_thumb.set_count(str(len(collation.e_ids_and_pages)))
+                item_thumb.update_clickable(
+                    clickable=(
+                        lambda checked=False,
+                        filepath=filepath,
+                        entry=cover_e,
+                        collation=collation: (
+                            self.expand_collation(collation.e_ids_and_pages)
+                        )
+                    )
+                )
 
-        # end_time = time.time()
-        # logging.info(
-        # 	f'[MAIN] Elements thumbs updated in {(end_time - start_time):.3f} seconds')
+            # Restore Selected Borders
+            if (item_thumb.mode, item_thumb.item_id) in self.selected:
+                item_thumb.thumb_button.set_selected(True)
+            else:
+                item_thumb.thumb_button.set_selected(False)
+
+            self.thumb_job_queue.put(
+                (
+                    item_thumb.renderer.render,
+                    (time.time(), filepath, base_size, ratio, False),
+                )
+            )
 
     def update_badges(self):
-        for i, item_thumb in enumerate(self.item_thumbs, start=0):
+        for item_thumb in self.item_thumbs:
             item_thumb.update_badges()
 
     def expand_collation(self, collation_entries: list[tuple[int, int]]):
         self.nav_forward([(ItemType.ENTRY, x[0]) for x in collation_entries])
         # self.update_thumbs()
 
-    def get_frame_contents(self, index=0, query: str = ""):
+    def get_frame_contents(self, index: int = 0, query: str = ""):
         return (
             [] if not self.frame_dict[query] else self.frame_dict[query][index],
             index,
@@ -1303,30 +1074,22 @@ class QtDriver(QObject):
 
     def filter_items(self, query: str = ""):
         if self.lib:
-            # logging.info('Filtering...')
             self.main_window.statusbar.showMessage(
                 f'Searching Library for "{query}"...'
             )
             self.main_window.statusbar.repaint()
             start_time = time.time()
 
-            # self.filtered_items = self.lib.search_library(query)
-            # 73601 Entries at 500 size should be 246
             all_items = self.lib.search_library(query)
-            frames: list[list[tuple[ItemType, int]]] = []
-            frame_count = math.ceil(len(all_items) / self.max_results)
-            for i in range(0, frame_count):
-                frames.append(
-                    all_items[
-                        min(len(all_items) - 1, (i) * self.max_results) : min(
-                            len(all_items), (i + 1) * self.max_results
-                        )
-                    ]
-                )
+
+            frames: Frames = []
+            for item_batch in batched(all_items, self.max_results):
+                frames.append(list(item_batch))
+
             for i, f in enumerate(frames):
                 logging.info(f"Query:{query}, Frame: {i},  Length: {len(f)}")
+
             self.frame_dict[query] = frames
-            # self.frame_dict[query] = [all_items]
 
             if self.cur_query == query:
                 # self.refresh_frame(self.lib.search_library(query))
@@ -1349,9 +1112,6 @@ class QtDriver(QObject):
                 self.main_window.statusbar.showMessage(
                     f"{len(all_items)} Results ({format_timespan(end_time - start_time)})"
                 )
-            # logging.info(f'Done Filtering! ({(end_time - start_time):.3f}) seconds')
-
-            # self.update_thumbs()
 
     def remove_recent_library(self, item_key: str):
         self.settings.beginGroup(SettingItems.LIBS_LIST)
@@ -1359,8 +1119,7 @@ class QtDriver(QObject):
         self.settings.endGroup()
         self.settings.sync()
 
-    @typing.no_type_check
-    def update_libs_list(self, path: Path):
+    def update_libs_list(self, path: str | Path):
         """add library to list in SettingItems.LIBS_LIST"""
         ITEMS_LIMIT = 5
         path = Path(path)
@@ -1370,7 +1129,7 @@ class QtDriver(QObject):
         all_libs = {str(time.time()): str(path)}
 
         for item_key in self.settings.allKeys():
-            item_path = self.settings.value(item_key)
+            item_path = str(self.settings.value(item_key))
             if Path(item_path) != path:
                 all_libs[item_key] = item_path
 
@@ -1386,23 +1145,15 @@ class QtDriver(QObject):
         self.settings.endGroup()
         self.settings.sync()
 
-    def open_library(self, path):
+    def open_library(self, path: str | Path) -> None:
         """Opens a TagStudio library."""
-        if self.lib.library_dir:
-            self.save_library()
+        if self.lib.root_path:
             self.lib.clear_internal_vars()
 
         self.main_window.statusbar.showMessage(f"Opening Library {path}", 3)
-        return_code = self.lib.open_library(path)
-        if return_code == 1:
-            # if self.args.external_preview:
-            # 	self.init_external_preview()
-
-            # if len(self.lib.entries) <= 1000:
-            # 	print(f'{INFO} Checking for missing files in Library \'{self.lib.library_dir}\'...')
-            # 	self.lib.refresh_missing_files()
-            # title_text = f'{self.base_title} - Library \'{self.lib.library_dir}\''
-            # self.main_window.setWindowTitle(title_text)
+        opened = self.lib.open_library(path)
+        if not opened:
+            logging.error(f"Failed to open library at {path}")
             pass
 
         else:
@@ -1413,7 +1164,7 @@ class QtDriver(QObject):
             self.add_new_files_callback()
 
         self.update_libs_list(path)
-        title_text = f"{self.base_title} - Library '{self.lib.library_dir}'"
+        title_text = f"{self.base_title} - Library '{self.lib.root_path}'"
         self.main_window.setWindowTitle(title_text)
 
         self.nav_frames = []
@@ -1431,7 +1182,7 @@ class QtDriver(QObject):
         data_only_mode: bool = False
         data_tint_mode: bool = False
 
-        self.main_window.statusbar.showMessage(f"Creating Library Collage...")
+        self.main_window.statusbar.showMessage("Creating Library Collage...")
         self.collage_start_time = time.time()
 
         # mode:int = self.scr_choose_option(subtitle='Choose Collage Mode(s)',
@@ -1523,15 +1274,16 @@ class QtDriver(QObject):
 
                     entry_id = self.lib.entries[i].id
                     renderer = CollageIconRenderer(self.lib)
-                    renderer.rendered.connect(
-                        lambda image, x=x, y=y: self.collage.paste(
-                            image, (y * thumb_size, x * thumb_size)
+                    renderer.rendered.connect(  # type: ignore
+                        lambda image, x=x, y=y: self.collage.paste(  # type: ignore
+                            image,  # type: ignore
+                            (y * thumb_size, x * thumb_size),
                         )
                     )
                     renderer.done.connect(lambda: self.try_save_collage(True))
                     self.thumb_job_queue.put(
                         (
-                            renderer.render,
+                            renderer.render,  # type: ignore
                             (
                                 entry_id,
                                 (thumb_size, thumb_size),

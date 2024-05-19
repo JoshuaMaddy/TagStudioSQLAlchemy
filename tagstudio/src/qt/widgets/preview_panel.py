@@ -9,46 +9,44 @@ import typing
 from datetime import datetime as dt
 
 import cv2
+from humanfriendly import format_size
 from PIL import Image, UnidentifiedImageError
 from PIL.Image import DecompressionBombError
-from PySide6.QtCore import Signal, Qt, QSize
-from PySide6.QtGui import QResizeEvent, QAction
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QAction, QResizeEvent
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
+    QMessageBox,
     QPushButton,
     QScrollArea,
-    QFrame,
-    QSplitter,
     QSizePolicy,
-    QMessageBox,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
-from humanfriendly import format_size
-
-from src.core.enums import SettingItems, Theme
-from src.core.library import Entry, ItemType, Library
-from src.core.ts_core import VIDEO_TYPES, IMAGE_TYPES
-from src.qt.helpers.file_opener import FileOpenerLabel, FileOpenerHelper, open_file
+from src.alt_core.library import Entry, Library
+from src.alt_core.ts_core import IMAGE_TYPES, VIDEO_TYPES
+from src.alt_core.types import ItemType, SettingItems, Theme
+from src.qt.helpers.file_opener import FileOpenerHelper, FileOpenerLabel, open_file
 from src.qt.modals.add_field import AddFieldModal
-from src.qt.widgets.thumb_renderer import ThumbRenderer
 from src.qt.widgets.fields import FieldContainer
+from src.qt.widgets.panel import PanelModal
 from src.qt.widgets.tag_box import TagBoxWidget
 from src.qt.widgets.text import TextWidget
-from src.qt.widgets.panel import PanelModal
 from src.qt.widgets.text_box_edit import EditTextBox
 from src.qt.widgets.text_line_edit import EditTextLine
-from src.qt.widgets.item_thumb import ItemThumb
-
+from src.qt.widgets.thumb_renderer import ThumbRenderer
 
 # Only import for type checking/autocompletion, will not be imported at runtime.
 if typing.TYPE_CHECKING:
     from src.qt.ts_qt import QtDriver
 
-ERROR = f"[ERROR]"
-WARNING = f"[WARNING]"
-INFO = f"[INFO]"
+ERROR = "[ERROR]"
+WARNING = "[WARNING]"
+INFO = "[INFO]"
 
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 
@@ -253,21 +251,23 @@ class PreviewPanel(QWidget):
         self._fill_libs_widget(libs_sorted, layout)
 
     def _fill_libs_widget(
-        self, libraries: list[tuple[str, tuple[str, str]]], layout: QVBoxLayout
+        self,
+        libraries: list[tuple[str, tuple[str, str]]],
+        layout: QVBoxLayout,
     ):
-        def clear_layout(layout_item: QVBoxLayout):
+        def clear_layout(layout_item: QLayout):
             for i in reversed(range(layout_item.count())):
                 child = layout_item.itemAt(i)
-                if child.widget() is not None:
+                if child.widget():
                     child.widget().deleteLater()
-                elif child.layout() is not None:
-                    clear_layout(child.layout())  # type: ignore
+                elif child.layout():
+                    clear_layout(child.layout())
 
         # remove any potential previous items
         clear_layout(layout)
 
         label = QLabel("Recent Libraries")
-        label.setAlignment(Qt.AlignCenter)  # type: ignore
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         row_layout = QHBoxLayout()
         row_layout.addWidget(label)
@@ -300,7 +300,7 @@ class PreviewPanel(QWidget):
             button = QPushButton(text=cut_val)
             button.setObjectName(f"path{item_key}")
 
-            def open_library_button_clicked(path):
+            def open_library_button_clicked(path: str):
                 return lambda: self.driver.open_library(path)
 
             button.clicked.connect(open_library_button_clicked(full_val))
@@ -432,7 +432,7 @@ class PreviewPanel(QWidget):
         # 0 Selected Items
         if not self.driver.selected:
             if self.selected or not self.initialized:
-                self.file_label.setText(f"No Items Selected")
+                self.file_label.setText("No Items Selected")
                 self.file_label.setFilePath("")
                 self.file_label.setCursor(Qt.CursorShape.ArrowCursor)
 
@@ -461,9 +461,7 @@ class PreviewPanel(QWidget):
                 item: Entry = self.lib.get_entry(self.driver.selected[0][1])
                 # If a new selection is made, update the thumbnail and filepath.
                 if not self.selected or self.selected != self.driver.selected:
-                    filepath = os.path.normpath(
-                        f"{self.lib.library_dir}/{item.path}/{item.filename}"
-                    )
+                    filepath = os.path.normpath(f"{self.lib.root_path}/{item.path}")
                     self.file_label.setFilePath(filepath)
                     window_title = filepath
                     ratio = self.devicePixelRatio()
@@ -713,7 +711,7 @@ class PreviewPanel(QWidget):
             self.tags_updated.disconnect()
         except RuntimeError:
             pass
-        logging.info(f"[UPDATE CONTAINER] Setting tags updated slot")
+        logging.info("[UPDATE CONTAINER] Setting tags updated slot")
         self.tags_updated.connect(slot)
 
     # def write_container(self, item:Union[Entry, Collation, Tag], index, field):

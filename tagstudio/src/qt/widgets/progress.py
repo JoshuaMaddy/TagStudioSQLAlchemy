@@ -3,10 +3,8 @@
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
 
-from typing import Optional
-
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QProgressDialog
+from PySide6.QtWidgets import QProgressDialog, QVBoxLayout, QWidget
 
 
 class ProgressWidget(QWidget):
@@ -16,7 +14,7 @@ class ProgressWidget(QWidget):
         self,
         window_title: str,
         label_text: str,
-        cancel_button_text: Optional[str],
+        cancel_button_text: str | None,
         minimum: int,
         maximum: int,
     ):
@@ -25,7 +23,7 @@ class ProgressWidget(QWidget):
         self.pb = QProgressDialog(
             labelText=label_text,
             minimum=minimum,
-            cancelButtonText=cancel_button_text,
+            cancelButtonText=cancel_button_text or "Cancel",
             maximum=maximum,
         )
         self.root.addWidget(self.pb)

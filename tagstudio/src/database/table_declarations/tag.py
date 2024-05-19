@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import ForeignKey, select
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
+from src.alt_core.types import TagColor
 from src.core.json_typing import JsonTag  # type: ignore
 
 from .base import Base
@@ -14,9 +15,11 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     name: Mapped[str]
-    shorthand: Mapped[str]
+    shorthand: Mapped[str | None]
+    color: Mapped[TagColor | None]
+    icon: Mapped[str | None]
 
-    aliases: Mapped[list[TagAlias]] = relationship(back_populates="tag")
+    aliases: Mapped[set[TagAlias]] = relationship(back_populates="tag")
 
     parent_tags: Mapped[set[Tag]] = relationship(
         secondary=tag_subtags,
@@ -32,9 +35,6 @@ class Tag(Base):
         back_populates="parent_tags",
     )
 
-    color: Mapped[str]
-    icon: Mapped[str]
-
     @property
     def subtag_ids(self) -> list[int]:
         return [tag.id for tag in self.subtags]
@@ -46,11 +46,11 @@ class Tag(Base):
     def __init__(
         self,
         name: str,
-        aliases: list[TagAlias],
-        subtags: set[Tag],
-        color: str,
-        icon: str,
-        shorthand: str,
+        aliases: set[TagAlias] = set(),
+        subtags: set[Tag] = set(),
+        icon: str | None = None,
+        shorthand: str | None = None,
+        color: TagColor | None = None,
     ):
         self.name = name
         self.aliases = aliases
@@ -94,7 +94,7 @@ class Tag(Base):
         if self.subtag_ids:
             obj["subtag_ids"] = self.subtag_ids
         if self.color:
-            obj["color"] = self.color
+            obj["color"] = self.color.value or ""
 
         return obj
 
