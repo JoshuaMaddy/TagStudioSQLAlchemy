@@ -974,7 +974,7 @@ class QtDriver(QObject):
                 self.thumb_job_queue.put(
                     (
                         item_thumb.renderer.render,
-                        (sys.float_info.max, "", base_size, ratio, True),
+                        (sys.float_info.max, "", base_size, ratio, True, True),
                     )
                 )
             else:
@@ -1053,7 +1053,7 @@ class QtDriver(QObject):
             self.thumb_job_queue.put(
                 (
                     item_thumb.renderer.render,
-                    (time.time(), filepath, base_size, ratio, False),
+                    (time.time(), filepath, base_size, ratio, False, True),
                 )
             )
 
