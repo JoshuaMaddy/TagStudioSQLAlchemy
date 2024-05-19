@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from src.alt_core.library import Entry, ItemType, Library
-from src.core.ts_core import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES
+from src.core.constants import AUDIO_TYPES, IMAGE_TYPES, VIDEO_TYPES
 from src.qt.flowlayout import FlowWidget
 from src.qt.helpers.file_opener import FileOpenerHelper
 from src.qt.widgets.thumb_button import ThumbButton
