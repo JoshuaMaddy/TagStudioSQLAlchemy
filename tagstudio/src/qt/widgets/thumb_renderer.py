@@ -9,27 +9,27 @@ import os
 from pathlib import Path
 
 import cv2
-import rawpy
-from pillow_heif import register_heif_opener, register_avif_opener
+import rawpy  # type: ignore
 from PIL import (
     Image,
-    UnidentifiedImageError,
-    ImageQt,
     ImageDraw,
+    ImageFile,
     ImageFont,
     ImageOps,
-    ImageFile,
+    ImageQt,
+    UnidentifiedImageError,
 )
 from PIL.Image import DecompressionBombError
-from PySide6.QtCore import QObject, Signal, QSize
+from pillow_heif import register_avif_opener, register_heif_opener  # type: ignore
+from PySide6.QtCore import QObject, QSize, Signal
 from PySide6.QtGui import QPixmap
-from src.qt.helpers.gradient import four_corner_gradient_background
 from src.core.constants import (
-    PLAINTEXT_TYPES,
-    VIDEO_TYPES,
     IMAGE_TYPES,
+    PLAINTEXT_TYPES,
     RAW_IMAGE_TYPES,
+    VIDEO_TYPES,
 )
+from src.qt.helpers.gradient import four_corner_gradient_background
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -37,81 +37,69 @@ ERROR = "[ERROR]"
 WARNING = "[WARNING]"
 INFO = "[INFO]"
 
+RESOURCES_DIR = Path(__file__).parents[3] / "resources/qt"
+
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 register_heif_opener()
 register_avif_opener()
 
 
 class ThumbRenderer(QObject):
-    # finished = Signal()
     updated = Signal(float, QPixmap, QSize, str)
     updated_ratio = Signal(float)
-    # updatedImage = Signal(QPixmap)
-    # updatedSize = Signal(QSize)
 
-    thumb_mask_512: Image.Image = Image.open(
-        Path(__file__).parents[3] / "resources/qt/images/thumb_mask_512.png"
-    )
+    thumb_mask_512 = Image.open(RESOURCES_DIR / "images/thumb_mask_512.png")
     thumb_mask_512.load()
 
-    thumb_mask_hl_512: Image.Image = Image.open(
-        Path(__file__).parents[3] / "resources/qt/images/thumb_mask_hl_512.png"
-    )
+    thumb_mask_hl_512 = Image.open(RESOURCES_DIR / "images/thumb_mask_hl_512.png")
     thumb_mask_hl_512.load()
 
-    thumb_loading_512: Image.Image = Image.open(
-        Path(__file__).parents[3] / "resources/qt/images/thumb_loading_512.png"
-    )
+    thumb_loading_512 = Image.open(RESOURCES_DIR / "images/thumb_loading_512.png")
     thumb_loading_512.load()
 
-    thumb_broken_512: Image.Image = Image.open(
-        Path(__file__).parents[3] / "resources/qt/images/thumb_broken_512.png"
-    )
+    thumb_broken_512 = Image.open(RESOURCES_DIR / "images/thumb_broken_512.png")
     thumb_broken_512.load()
 
-    thumb_file_default_512: Image.Image = Image.open(
-        Path(__file__).parents[3] / "resources/qt/images/thumb_file_default_512.png"
+    thumb_file_default_512 = Image.open(
+        RESOURCES_DIR / "images/thumb_file_default_512.png"
     )
     thumb_file_default_512.load()
-
-    # thumb_debug: Image.Image = Image.open(Path(
-    # 	f'{Path(__file__).parents[2]}/resources/qt/images/temp.jpg'))
-    # thumb_debug.load()
 
     # TODO: Make dynamic font sized given different pixel ratios
     font_pixel_ratio: float = 1
     ext_font = ImageFont.truetype(
-        Path(__file__).parents[3] / "resources/qt/fonts/Oxanium-Bold.ttf",
-        math.floor(12 * font_pixel_ratio),
+        font=str(RESOURCES_DIR / "fonts/Oxanium-Bold.ttf"),
+        size=math.floor(12 * font_pixel_ratio),
     )
 
     def render(
         self,
         timestamp: float,
-        filepath,
+        filepath: str,
         base_size: tuple[int, int],
         pixel_ratio: float,
-        is_loading=False,
-        gradient=False,
-        update_on_ratio_change=False,
+        is_loading: bool = False,
+        gradient: bool = False,
+        update_on_ratio_change: bool = False,
     ):
         """Internal renderer. Renders an entry/element thumbnail for the GUI."""
-        image: Image.Image = None
-        pixmap: QPixmap = None
-        final: Image.Image = None
-        extension: str = None
+        image: Image.Image | None = None
+        pixmap: QPixmap | None = None
+        final: Image.Image | None = None
+        extension: str | None = None
         resampling_method = Image.Resampling.BILINEAR
         if ThumbRenderer.font_pixel_ratio != pixel_ratio:
             ThumbRenderer.font_pixel_ratio = pixel_ratio
             ThumbRenderer.ext_font = ImageFont.truetype(
-                Path(__file__).parents[3] / "resources/qt/fonts/Oxanium-Bold.ttf",
-                math.floor(12 * ThumbRenderer.font_pixel_ratio),
+                font=str(RESOURCES_DIR / "fonts/Oxanium-Bold.ttf"),
+                size=math.floor(12 * ThumbRenderer.font_pixel_ratio),
             )
 
         adj_size = math.ceil(max(base_size[0], base_size[1]) * pixel_ratio)
         if is_loading:
             final = ThumbRenderer.thumb_loading_512.resize(
-                (adj_size, adj_size), resample=Image.Resampling.BILINEAR
+                size=(adj_size, adj_size),
+                resample=Image.Resampling.BILINEAR,
             )
             qim = ImageQt.ImageQt(final)
             pixmap = QPixmap.fromImage(qim)
@@ -129,8 +117,10 @@ class ThumbRenderer(QObject):
                         if image.mode != "RGB" and image.mode != "RGBA":
                             image = image.convert(mode="RGBA")
                         if image.mode == "RGBA":
-                            new_bg = Image.new("RGB", image.size, color="#1e1e1e")
-                            new_bg.paste(image, mask=image.getchannel(3))
+                            new_bg = Image.new(
+                                mode="RGB", size=image.size, color="#1e1e1e"
+                            )
+                            new_bg.paste(im=image, mask=image.getchannel(3))
                             image = new_bg
 
                         image = ImageOps.exif_transpose(image)
@@ -141,19 +131,19 @@ class ThumbRenderer(QObject):
 
                 elif extension in RAW_IMAGE_TYPES:
                     try:
-                        with rawpy.imread(filepath) as raw:
-                            rgb = raw.postprocess()
-                            image = Image.frombytes(
-                                "RGB",
-                                (rgb.shape[1], rgb.shape[0]),
-                                rgb,
+                        with rawpy.imread(filepath) as raw:  # type: ignore
+                            rgb = raw.postprocess()  # type: ignore
+                            image = Image.frombytes(  # type: ignore
+                                mode="RGB",
+                                size=(rgb.shape[1], rgb.shape[0]),  # type: ignore
+                                data=rgb,  # type: ignore
                                 decoder_name="raw",
                             )
                     except DecompressionBombError as e:
                         logging.info(
                             f"[ThumbRenderer]{WARNING} Couldn't Render thumbnail for {filepath} (because of {e})"
                         )
-                    except rawpy._rawpy.LibRawIOError:
+                    except rawpy._rawpy.LibRawIOError:  # type: ignore
                         logging.info(
                             f"[ThumbRenderer]{ERROR} Couldn't Render thumbnail for raw image {filepath}"
                         )
@@ -162,26 +152,26 @@ class ThumbRenderer(QObject):
                 elif extension in VIDEO_TYPES:
                     video = cv2.VideoCapture(filepath)
                     video.set(
-                        cv2.CAP_PROP_POS_FRAMES,
-                        (video.get(cv2.CAP_PROP_FRAME_COUNT) // 2),
+                        propId=cv2.CAP_PROP_POS_FRAMES,
+                        value=(video.get(cv2.CAP_PROP_FRAME_COUNT) // 2),
                     )
                     success, frame = video.read()
                     if not success:
                         # Depending on the video format, compression, and frame
                         # count, seeking halfway does not work and the thumb
                         # must be pulled from the earliest available frame.
-                        video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        video.set(propId=cv2.CAP_PROP_POS_FRAMES, value=0)
                         success, frame = video.read()
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = cv2.cvtColor(src=frame, code=cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame)
 
                 # Plain Text ===================================================
                 elif extension in PLAINTEXT_TYPES:
                     with open(filepath, "r", encoding="utf-8") as text_file:
                         text = text_file.read(256)
-                    bg = Image.new("RGB", (256, 256), color="#1e1e1e")
-                    draw = ImageDraw.Draw(bg)
-                    draw.text((16, 16), text, file=(255, 255, 255))
+                    bg = Image.new(mode="RGB", size=(256, 256), color="#1e1e1e")
+                    draw = ImageDraw.Draw(im=bg)
+                    draw.text(xy=(16, 16), text=text, file=(255, 255, 255))  # type: ignore
                     image = bg
                 # 3D ===========================================================
                 # elif extension == 'stl':
@@ -205,7 +195,7 @@ class ThumbRenderer(QObject):
                 # No Rendered Thumbnail ========================================
                 else:
                     image = ThumbRenderer.thumb_file_default_512.resize(
-                        (adj_size, adj_size), resample=Image.Resampling.BILINEAR
+                        size=(adj_size, adj_size), resample=Image.Resampling.BILINEAR
                     )
 
                 if not image:
@@ -234,31 +224,33 @@ class ThumbRenderer(QObject):
                 image = image.resize((new_x, new_y), resample=resampling_method)
                 if gradient:
                     mask: Image.Image = ThumbRenderer.thumb_mask_512.resize(
-                        (adj_size, adj_size), resample=Image.Resampling.BILINEAR
+                        size=(adj_size, adj_size), resample=Image.Resampling.BILINEAR
                     ).getchannel(3)
                     hl: Image.Image = ThumbRenderer.thumb_mask_hl_512.resize(
-                        (adj_size, adj_size), resample=Image.Resampling.BILINEAR
+                        size=(adj_size, adj_size), resample=Image.Resampling.BILINEAR
                     )
-                    final = four_corner_gradient_background(image, adj_size, mask, hl)
+                    final = four_corner_gradient_background(
+                        image=image, adj_size=adj_size, mask=mask, hl=hl
+                    )
                 else:
                     scalar = 4
                     rec: Image.Image = Image.new(
-                        "RGB",
-                        tuple([d * scalar for d in image.size]),  # type: ignore
-                        "black",
+                        mode="RGB",
+                        size=tuple([d * scalar for d in image.size]),  # type: ignore
+                        color="black",
                     )
-                    draw = ImageDraw.Draw(rec)
+                    draw = ImageDraw.Draw(im=rec)
                     draw.rounded_rectangle(
-                        (0, 0) + rec.size,
-                        (base_size[0] // 32) * scalar * pixel_ratio,
+                        xy=(0, 0) + rec.size,
+                        radius=(base_size[0] // 32) * scalar * pixel_ratio,
                         fill="red",
                     )
                     rec = rec.resize(
-                        tuple([d // scalar for d in rec.size]),
+                        size=tuple([d // scalar for d in rec.size]),  # type:ignore
                         resample=Image.Resampling.BILINEAR,
                     )
-                    final = Image.new("RGBA", image.size, (0, 0, 0, 0))
-                    final.paste(image, mask=rec.getchannel(0))
+                    final = Image.new(mode="RGBA", size=image.size, color=(0, 0, 0, 0))
+                    final.paste(im=image, mask=rec.getchannel(0))
             except (
                 UnidentifiedImageError,
                 FileNotFoundError,
@@ -282,6 +274,9 @@ class ThumbRenderer(QObject):
             pixmap = QPixmap.fromImage(qim)
             pixmap.setDevicePixelRatio(pixel_ratio)
         if pixmap:
+            if final is None:
+                raise ValueError
+
             self.updated.emit(
                 timestamp,
                 pixmap,
@@ -293,4 +288,4 @@ class ThumbRenderer(QObject):
             )
 
         else:
-            self.updated.emit(timestamp, QPixmap(), QSize(*base_size), extension)
+            self.updated.emit(timestamp, QPixmap(xpm=[]), QSize(*base_size), extension)

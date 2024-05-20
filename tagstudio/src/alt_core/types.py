@@ -1,11 +1,6 @@
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-
-
-class ItemType(Enum):
-    ENTRY = 0
-    COLLATION = 1
-    TAG_GROUP = 2
 
 
 class SettingItems(str, Enum):
@@ -23,12 +18,79 @@ class Theme(str, Enum):
     COLOR_PRESSED = "#65EEEEEE"
 
 
-ContentItem = tuple[ItemType, int, Path]
-Frame = list[ContentItem]
+@dataclass
+class EntrySearchResult:
+    id: int
+    path: Path
+    favorited: bool
+    archived: bool
+
+    @property
+    def __key(self) -> tuple[int, str, bool, bool]:
+        return (self.id, str(self.path), self.favorited, self.archived)
+
+    def __hash__(self) -> int:
+        return hash(self.__key)
+
+    def __eq__(self, value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, EntrySearchResult):
+            return value.__key == self.__key
+        elif isinstance(value, (CollationSearchResult, TagGroupSearchResult)):
+            return False
+        raise ValueError(f"Type {type(value)} not comparable.")
+
+
+@dataclass
+class CollationSearchResult:
+    id: int
+
+    @property
+    def __key(self) -> int:
+        return self.id
+
+    def __hash__(self) -> int:
+        return hash(self.__key)
+
+    def __eq__(self, value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, CollationSearchResult):
+            return value.__key == self.__key
+        elif isinstance(value, (EntrySearchResult, TagGroupSearchResult)):
+            return False
+        raise ValueError(f"Type {type(value)} not comparable.")
+
+
+@dataclass
+class TagGroupSearchResult:
+    id: int
+
+    @property
+    def __key(self) -> int:
+        return self.id
+
+    def __hash__(self) -> int:
+        return hash(self.__key)
+
+    def __eq__(self, value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, TagGroupSearchResult):
+            return value.__key == self.__key
+        elif isinstance(value, (EntrySearchResult, CollationSearchResult)):
+            return False
+        raise ValueError(f"Type {type(value)} not comparable.")
+
+
+SearchResult = EntrySearchResult | CollationSearchResult | TagGroupSearchResult
+Frame = list[SearchResult]
 Frames = list[Frame]
 
 
 class TagColor(Enum):
+    default = ""
     black = "black"
     dark_gray = "dark gray"
     gray = "gray"

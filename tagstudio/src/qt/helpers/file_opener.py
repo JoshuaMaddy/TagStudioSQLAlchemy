@@ -4,17 +4,17 @@
 
 import logging
 import os
-import subprocess
 import shutil
+import subprocess
 import sys
 import traceback
 
-from PySide6.QtWidgets import QLabel
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel
 
-ERROR = f"[ERROR]"
-WARNING = f"[WARNING]"
-INFO = f"[INFO]"
+ERROR = "[ERROR]"
+WARNING = "[WARNING]"
+INFO = "[INFO]"
 
 logging.basicConfig(format="%(message)s", level=logging.INFO)
 
@@ -124,7 +124,7 @@ class FileOpenerLabel(QLabel):
         """
         super().__init__(text, parent)
 
-    def setFilePath(self, filepath):
+    def setFilePath(self, filepath: str):
         """Set the filepath to open.
 
         Args:

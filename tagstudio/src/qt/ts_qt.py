@@ -13,7 +13,6 @@ import math
 import os
 import sys
 import time
-import typing
 import webbrowser
 from argparse import Namespace
 from datetime import datetime as dt
@@ -49,7 +48,6 @@ from PySide6.QtWidgets import (
     QSplitter,
     QWidget,
 )
-from src.alt_core.library import ItemType
 from src.alt_core.ts_core import (
     COLLAGE_FOLDER_NAME,
     TS_FOLDER_NAME,
@@ -57,7 +55,13 @@ from src.alt_core.ts_core import (
     VERSION_BRANCH,
     TagStudioCore,
 )
-from src.alt_core.types import Frame, Frames, SettingItems
+from src.alt_core.types import (
+    EntrySearchResult,
+    Frame,
+    Frames,
+    SearchResult,
+    SettingItems,
+)
 from src.core.utils.web import strip_web_protocol
 from src.qt.flowlayout import FlowLayout
 from src.qt.helpers.custom_runnable import CustomRunnable
@@ -69,14 +73,16 @@ from src.qt.modals.fix_dupes import FixDupeFilesModal
 from src.qt.modals.fix_unlinked import FixUnlinkedEntriesModal
 from src.qt.modals.folders_to_tags import FoldersToTagsModal
 from src.qt.modals.tag_database import TagDatabasePanel
+from src.qt.resources_rc import qInitResources
 from src.qt.widgets.collage_icon import CollageIconRenderer
 from src.qt.widgets.item_thumb import ItemThumb
-from src.qt.widgets.panel import PanelModal
+from src.qt.widgets.panel import PanelModal, PanelWidget
 from src.qt.widgets.preview_panel import PreviewPanel
 from src.qt.widgets.progress import ProgressWidget
 from src.qt.widgets.thumb_renderer import ThumbRenderer
 
-# this import has side-effect of import PySide resources
+# This import has side-effect of import PySide resources
+LOAD_RESOURCES = qInitResources
 
 # SIGQUIT is not defined on Windows
 if sys.platform == "win32":
@@ -168,9 +174,9 @@ class QtDriver(QObject):
         self.thumb_threads: list[Consumer] = []
         self.thumb_cutoff: float = time.time()
 
-        self.selected: list[tuple[ItemType, int]] = []
+        self.selected: list[SearchResult] = []
 
-        self.SIGTERM.connect(self.handleSIGTERM)
+        self.SIGTERM.connect(self.handle_SIGTERM)
 
         if self.args.config_file:
             path = Path(self.args.config_file)
@@ -192,10 +198,8 @@ class QtDriver(QObject):
             )
 
         max_threads = os.cpu_count() or 1
-
         if args.ci:
             max_threads = 1
-
         for i in range(max_threads):
             thread = Consumer(self.thumb_job_queue)
             thread.setObjectName(f"ThumbRenderer_{i}")
@@ -225,16 +229,19 @@ class QtDriver(QObject):
         """Launches the main Qt window."""
 
         loader = QUiLoader()
+
         if os.name == "nt":
             sys.argv += ["-platform", "windows:darkmode=2"]
+
         app = QApplication(sys.argv)
         app.setStyle("Fusion")
-        home_path = os.path.normpath(f"{Path(__file__).parent}/ui/home.ui")
-        icon_path = os.path.normpath(f"{Path(__file__).parents[2]}/resources/icon.png")
+
+        home_path = str(Path(__file__).parent / "ui/home.ui")
+        icon_path = str(Path(__file__).parents[2] / "resources/icon.png")
 
         # Handle OS signals
         self.setup_signals()
-        # allow to process input from console, eg. SIGTERM
+        # Allow processing input from console, eg. SIGTERM
         timer = QTimer()
         timer.start(500)
         timer.timeout.connect(lambda: None)
@@ -244,7 +251,6 @@ class QtDriver(QObject):
         self.main_window.mousePressEvent = self.mouse_navigation  # type: ignore
 
         splash_pixmap = QPixmap(":/images/splash.png")
-        splash_pixmap.setDevicePixelRatio(self.main_window.devicePixelRatio())
         self.splash = QSplashScreen(splash_pixmap, Qt.WindowStaysOnTopHint)  # type: ignore
         self.splash.show()
 
@@ -258,7 +264,6 @@ class QtDriver(QObject):
             app.setWindowIcon(icon)
 
         menu_bar = QMenuBar(self.main_window)
-        self.main_window.setMenuBar(menu_bar)
         menu_bar.setNativeMenuBar(True)
 
         file_menu = QMenu("&File", menu_bar)
@@ -268,30 +273,20 @@ class QtDriver(QObject):
         window_menu = QMenu("&Window", menu_bar)
         help_menu = QMenu("&Help", menu_bar)
 
+        self.main_window.setMenuBar(menu_bar)
+
         # File Menu ============================================================
         open_library_action = QAction("&Open/Create Library", menu_bar)
-        open_library_action.triggered.connect(lambda: self.open_library_from_dialog())
+        open_library_action.triggered.connect(self.open_library_from_dialog)
         open_library_action.setShortcut(
             QtCore.QKeyCombination(
-                QtCore.Qt.KeyboardModifier(QtCore.Qt.KeyboardModifier.ControlModifier),
+                QtCore.Qt.KeyboardModifier.ControlModifier,
                 QtCore.Qt.Key.Key_O,
             )
         )
         open_library_action.setToolTip("Ctrl+O")
-        file_menu.addAction(open_library_action)  # type: ignore
 
-        save_library_action = QAction("&Save Library", menu_bar)
-        save_library_action.triggered.connect(
-            lambda: self.callback_library_needed_check(self.save_library)  # type: ignore
-        )
-        save_library_action.setShortcut(
-            QtCore.QKeyCombination(
-                QtCore.Qt.KeyboardModifier(QtCore.Qt.KeyboardModifier.ControlModifier),
-                QtCore.Qt.Key.Key_S,
-            )
-        )
-        save_library_action.setStatusTip("Ctrl+S")
-        file_menu.addAction(save_library_action)  # type: ignore
+        file_menu.addAction(open_library_action)  # type: ignore
 
         save_library_backup_action = QAction("&Save Library Backup", menu_bar)
         save_library_backup_action.triggered.connect(
@@ -307,6 +302,7 @@ class QtDriver(QObject):
             )
         )
         save_library_backup_action.setStatusTip("Ctrl+Shift+S")
+
         file_menu.addAction(save_library_backup_action)  # type: ignore
 
         file_menu.addSeparator()
@@ -327,12 +323,12 @@ class QtDriver(QObject):
         file_menu.addSeparator()
 
         close_library_action = QAction("&Close Library", menu_bar)
-        close_library_action.triggered.connect(lambda: self.close_library())
+        close_library_action.triggered.connect(lambda: self.close_library())  # type: ignore
         file_menu.addAction(close_library_action)  # type: ignore
 
         # Edit Menu ============================================================
         new_tag_action = QAction("New &Tag", menu_bar)
-        new_tag_action.triggered.connect(lambda: self.add_tag_action_callback())
+        new_tag_action.triggered.connect(lambda: self.add_tag_action_callback())  # type: ignore
         new_tag_action.setShortcut(
             QtCore.QKeyCombination(
                 QtCore.Qt.KeyboardModifier(QtCore.Qt.KeyboardModifier.ControlModifier),
@@ -341,17 +337,16 @@ class QtDriver(QObject):
         )
         new_tag_action.setToolTip("Ctrl+T")
         edit_menu.addAction(new_tag_action)  # type: ignore
-
         edit_menu.addSeparator()
 
         manage_file_extensions_action = QAction("Ignored File Extensions", menu_bar)
         manage_file_extensions_action.triggered.connect(
-            lambda: self.show_file_extension_modal()
+            lambda: self.show_file_extension_modal()  # type: ignore
         )
         edit_menu.addAction(manage_file_extensions_action)  # type: ignore
 
         tag_database_action = QAction("Manage Tags", menu_bar)
-        tag_database_action.triggered.connect(lambda: self.show_tag_database())
+        tag_database_action.triggered.connect(lambda: self.show_tag_database())  # type: ignore
         edit_menu.addAction(tag_database_action)  # type: ignore
 
         check_action = QAction("Open library on start", self)
@@ -360,9 +355,9 @@ class QtDriver(QObject):
             self.settings.value(SettingItems.START_LOAD_LAST, True, type=bool)  # type: ignore
         )
         check_action.triggered.connect(
-            lambda checked: self.settings.setValue(
+            lambda checked: self.settings.setValue(  # type: ignore
                 SettingItems.START_LOAD_LAST, checked
-            )  # type: ignore
+            )
         )
         window_menu.addAction(check_action)  # type: ignore
 
@@ -478,6 +473,10 @@ class QtDriver(QObject):
             )
             self.open_library(lib)
 
+        if self.args.ci:
+            # gracefully terminate the app in CI environment
+            self.thumb_job_queue.put((self.SIGTERM.emit, []))
+
         app.exec()
 
         self.shutdown()
@@ -513,8 +512,7 @@ class QtDriver(QObject):
                         index,  # type: ignore
                         self.nav_frames[self.cur_frame_idx].search_text,  # type: ignore
                     )
-                ),
-                logging.info(f"Emitted {index}"),
+                )
             )
         )
 
@@ -548,7 +546,7 @@ class QtDriver(QObject):
         if self.lib.root_path:
             func()
 
-    def handleSIGTERM(self):
+    def handle_SIGTERM(self):
         self.shutdown()
 
     def shutdown(self):
@@ -569,7 +567,6 @@ class QtDriver(QObject):
 
     def close_library(self):
         if self.lib.root_path:
-            logging.info("Closing Library...")
             self.main_window.statusbar.showMessage("Closing & Saving Library...")
             start_time = time.time()
             self.settings.setValue(SettingItems.LAST_LIBRARY, self.lib.root_path)
@@ -597,12 +594,21 @@ class QtDriver(QObject):
 
     def add_tag_action_callback(self):
         self.modal = PanelModal(
-            BuildTagPanel(self.lib), "New Tag", "Add Tag", has_save=True
+            widget=BuildTagPanel(self.lib),
+            title="New Tag",
+            window_title="Add Tag",
+            has_save=True,
         )
-        panel: BuildTagPanel = self.modal.widget
+
+        panel: PanelWidget = self.modal.widget
+
+        if not isinstance(panel, BuildTagPanel):
+            raise ValueError
+
         self.modal.saved.connect(
-            lambda: (self.lib.add_tag_to_library(panel.build_tag()), self.modal.hide())
+            lambda: (self.lib.create_tag(panel.build_tag()), self.modal.hide())
         )
+
         self.modal.show()
 
     def show_tag_database(self):
@@ -693,9 +699,9 @@ class QtDriver(QObject):
             if entry.fields:
                 for i, field in enumerate(entry.fields, start=0):
                     if self.lib.get_field_attr(field, "type") == "text_line":
-                        self.lib.update_entry_field(
+                        self.lib.update_field(
                             entry_id=entry_id,
-                            field_index=i,
+                            field_id=i,
                             content=strip_web_protocol(
                                 self.lib.get_field_attr(field, "content")
                             ),
@@ -703,7 +709,6 @@ class QtDriver(QObject):
                         )
 
     def mouse_navigation(self, event: QMouseEvent):
-        # print(event.button())
         if event.button() == Qt.MouseButton.ForwardButton:
             self.nav_forward()
         elif event.button() == Qt.MouseButton.BackButton:
@@ -749,7 +754,6 @@ class QtDriver(QObject):
                         search_text=search_text,
                     )
                 )
-                # logging.info(f'Saving Text: {search_text}')
             # Update the last frame's scroll_pos
             self.nav_frames[self.cur_frame_idx].scrollbar_pos = sb_pos
             self.cur_frame_idx += 1 if not trimmed else 0
@@ -762,11 +766,9 @@ class QtDriver(QObject):
             self.nav_frames.append(
                 NavigationState(frame_content, 0, page_index, page_count, search_text)
             )
-            # logging.info(f'Saving Text: {search_text}')
             self.nav_frames[self.cur_frame_idx].scrollbar_pos = sb_pos
             self.cur_frame_idx += 1 if not trimmed else 0
 
-        # if self.nav_stack[self.cur_page_idx].contents:
         if (self.cur_frame_idx != original_pos) or (frame_content is not None):
             self.update_thumbs()
             sb.verticalScrollBar().setValue(
@@ -797,7 +799,7 @@ class QtDriver(QObject):
                     self.nav_frames[self.cur_frame_idx].scrollbar_pos
                 )
                 self.main_window.searchField.setText(
-                    self.nav_frames[self.cur_frame_idx].search_text
+                    self.nav_frames[self.cur_frame_idx].search_text or ""
                 )
                 self.main_window.pagination.update_buttons(
                     self.nav_frames[self.cur_frame_idx].page_count,
@@ -825,47 +827,41 @@ class QtDriver(QObject):
             )
         else:
             self.nav_forward(
-                content=frame_content,
+                frame_content=frame_content,
                 page_index=page_index,
                 page_count=page_count,
             )
         self.update_thumbs()
-        # logging.info(f'Refresh: {[len(x.contents) for x in self.nav_stack]}, Index {self.cur_page_idx}')
 
-    @typing.no_type_check
-    def purge_item_from_navigation(self, type: ItemType, id: int):
-        # logging.info(self.nav_frames)
-        # TODO - types here are ambiguous
+    def purge_item_from_navigation(self, search_result: SearchResult):
         for i, frame in enumerate(self.nav_frames, start=0):
-            while (type, id) in frame.contents:
-                logging.info(f"Removing {id} from nav stack frame {i}")
-                frame.contents.remove((type, id))
+            while search_result in frame.contents:
+                logging.info(f"Removing {search_result.id} from nav stack frame {i}")
+                frame.contents.remove(search_result)
 
         for i, key in enumerate(self.frame_dict.keys(), start=0):
             for frame in self.frame_dict[key]:
-                while (type, id) in frame:
-                    logging.info(f"Removing {id} from frame dict item {i}")
-                    frame.remove((type, id))
+                while search_result in frame:
+                    logging.info(
+                        f"Removing {search_result.id} from frame dict item {i}"
+                    )
+                    frame.remove(search_result)
 
-        while (type, id) in self.selected:
+        while search_result in self.selected:
             logging.info(f"Removing {id} from frame selected")
-            self.selected.remove((type, id))
+            self.selected.remove(search_result)
 
     def _init_thumb_grid(self):
-        # logging.info('Initializing Thumbnail Grid...')
         layout = FlowLayout()
         layout.setGridEfficiency(True)
-        # layout.setContentsMargins(0,0,0,0)
         layout.setSpacing(min(self.thumb_size // 10, 12))
-        # layout = QHBoxLayout()
-        # layout.setSizeConstraint(QLayout.SizeConstraint.SetMaximumSize)
-        # layout = QListView()
-        # layout.setViewMode(QListView.ViewMode.IconMode)
 
-        col_size = 28
-        for i in range(0, self.max_results):
+        for _ in range(0, self.max_results):
             item_thumb = ItemThumb(
-                None, self.lib, self.preview_panel, (self.thumb_size, self.thumb_size)
+                search_result=None,
+                library=self.lib,
+                preview_panel=self.preview_panel,
+                thumb_size=(self.thumb_size, self.thumb_size),
             )
             layout.addWidget(item_thumb)
             self.item_thumbs.append(item_thumb)
@@ -879,72 +875,75 @@ class QtDriver(QObject):
         sa.setWidgetResizable(True)
         sa.setWidget(self.flow_container)
 
-    def select_item(self, type: ItemType, id: int, append: bool, bridge: bool):
+    def select_item(self, search_result: SearchResult, append: bool, bridge: bool):
         """Selects one or more items in the Thumbnail Grid."""
         if append:
-            # self.selected.append((thumb_index, page_index))
-            if ((type, id)) not in self.selected:
-                self.selected.append((type, id))
-                for it in self.item_thumbs:
-                    if it.mode == type and it.item_id == id:
-                        it.thumb_button.set_selected(True)
+            if search_result not in self.selected:
+                self.selected.append(search_result)
+                for item_thumb in self.item_thumbs:
+                    if item_thumb.search_result == search_result:
+                        item_thumb.thumb_button.set_selected(True)
             else:
-                self.selected.remove((type, id))
-                for it in self.item_thumbs:
-                    if it.mode == type and it.item_id == id:
-                        it.thumb_button.set_selected(False)
-            # self.item_thumbs[thumb_index].thumb_button.set_selected(True)
+                self.selected.remove(search_result)
+                for item_thumb in self.item_thumbs:
+                    if item_thumb.search_result == search_result:
+                        item_thumb.thumb_button.set_selected(False)
 
         elif bridge and self.selected:
             logging.info(f"Last Selected: {self.selected[-1]}")
             contents = self.nav_frames[self.cur_frame_idx].contents
-            last_index = self.nav_frames[self.cur_frame_idx].contents.index(
-                self.selected[-1]
-            )
-            current_index = self.nav_frames[self.cur_frame_idx].contents.index(
-                (type, id)
-            )
-            index_range: list = contents[
+
+            last_index = contents.index(self.selected[-1])
+            current_index = contents.index(search_result)
+
+            index_range = contents[
                 min(last_index, current_index) : max(last_index, current_index) + 1
             ]
-            # Preserve bridge direction for correct appending order.
+
             if last_index < current_index:
                 index_range.reverse()
 
-            # logging.info(f'Current Frame Contents: {len(self.nav_frames[self.cur_frame_idx].contents)}')
-            # logging.info(f'Last Selected Index: {last_index}')
-            # logging.info(f'Current Selected Index: {current_index}')
-            # logging.info(f'Index Range: {index_range}')
+            for search_result in index_range:
+                if search_result not in self.selected:
+                    self.selected.append(search_result)
 
-            for c_type, c_id in index_range:
-                for it in self.item_thumbs:
-                    if it.mode == c_type and it.item_id == c_id:
-                        it.thumb_button.set_selected(True)
-                        if ((c_type, c_id)) not in self.selected:
-                            self.selected.append((c_type, c_id))
+            for item_thumb in self.item_thumbs:
+                if item_thumb.search_result in self.selected:
+                    item_thumb.thumb_button.set_selected(True)
+                else:
+                    item_thumb.thumb_button.set_selected(False)
         else:
             self.selected.clear()
-            self.selected.append((type, id))
-            for it in self.item_thumbs:
-                if it.mode == type and it.item_id == id:
-                    it.thumb_button.set_selected(True)
+            self.selected.append(search_result)
+            for item_thumb in self.item_thumbs:
+                if item_thumb.search_result == search_result:
+                    item_thumb.thumb_button.set_selected(True)
                 else:
-                    it.thumb_button.set_selected(False)
+                    item_thumb.thumb_button.set_selected(False)
 
         # NOTE: By using the preview panel's "set_tags_updated_slot" method,
         # only the last of multiple identical item selections are connected.
         # If attaching the slot to multiple duplicate selections is needed,
         # just bypass the method and manually disconnect and connect the slots.
         if len(self.selected) == 1:
-            for it in self.item_thumbs:
-                if it.mode == type and it.item_id == id:
-                    self.preview_panel.set_tags_updated_slot(it.update_badges)
+            for item_thumb in self.item_thumbs:
+                if item_thumb.search_result == search_result:
+                    self.preview_panel.set_tags_updated_slot(item_thumb.update_badges)
+                    break
 
         self.set_macro_menu_viability()
         self.preview_panel.update_widgets()
 
     def set_macro_menu_viability(self):
-        if len([x[1] for x in self.selected if x[0] == ItemType.ENTRY]) == 0:
+        number_of_entries_selected = len(
+            [
+                selected.id
+                for selected in self.selected
+                if isinstance(selected, EntrySearchResult)
+            ]
+        )
+
+        if number_of_entries_selected == 0:
             self.autofill_action.setDisabled(True)
             self.sort_fields_action.setDisabled(True)
         else:
@@ -953,6 +952,9 @@ class QtDriver(QObject):
 
     def update_thumbs(self):
         """Updates search thumbnails."""
+        if self.lib.root_path is None:
+            return
+
         with self.thumb_job_queue.mutex:
             # Cancels all thumb jobs waiting to be started
             self.thumb_job_queue.queue.clear()
@@ -964,12 +966,10 @@ class QtDriver(QObject):
         ratio: float = self.main_window.devicePixelRatio()
         base_size: tuple[int, int] = (self.thumb_size, self.thumb_size)
 
-        limited_thumbs = self.item_thumbs[
-            : len(self.nav_frames[self.cur_frame_idx].contents)
-        ]
-        for i, item_thumb in enumerate(limited_thumbs):
+        for i, item_thumb in enumerate(self.item_thumbs):
             if i < len(self.nav_frames[self.cur_frame_idx].contents):
-                item_thumb.set_mode(self.nav_frames[self.cur_frame_idx].contents[i][0])
+                search_result = self.nav_frames[self.cur_frame_idx].contents[i]
+                item_thumb.set_search_result(search_result)
                 item_thumb.ignore_size = False
                 self.thumb_job_queue.put(
                     (
@@ -979,35 +979,37 @@ class QtDriver(QObject):
                 )
             else:
                 item_thumb.ignore_size = True
-                item_thumb.set_mode(None)
+                item_thumb.set_search_result(None)
                 item_thumb.set_item_id(-1)
                 item_thumb.thumb_button.set_selected(False)
 
         self.flow_container.layout().update()
         self.main_window.update()
 
+        limited_thumbs = self.item_thumbs[
+            : len(self.nav_frames[self.cur_frame_idx].contents)
+        ]
         for i, item_thumb in enumerate(limited_thumbs):
-            item_type, item_id, path = self.nav_frames[self.cur_frame_idx].contents[i]
+            search_result = self.nav_frames[self.cur_frame_idx].contents[i]
 
-            if item_type == ItemType.ENTRY:
-                filepath = self.lib.root_path / path
+            if isinstance(search_result, EntrySearchResult):
+                filepath = self.lib.root_path / search_result.path
 
-                item_thumb.set_item_id(item_id)
+                item_thumb.set_item_id(search_result.id)
+                item_thumb.search_result = search_result
                 item_thumb.opener.set_filepath(str(filepath))
 
-                # TODO
-                item_thumb.assign_archived(False)
-                item_thumb.assign_favorite(False)
+                item_thumb.assign_archived(search_result.archived)
+                item_thumb.assign_favorite(search_result.favorited)
 
-                # ctrl_down = True if QGuiApplication.keyboardModifiers() else False
                 # TODO: Change how this works. The click function
                 # for collations a few lines down should NOT be allowed during modifier keys.
 
                 item_thumb.update_clickable(
                     clickable=(
-                        lambda checked=False, entry_id=item_id: self.select_item(
-                            type=ItemType.ENTRY,
-                            id=entry_id,
+                        lambda checked=False,
+                        search_result=search_result: self.select_item(
+                            search_result=search_result,
                             append=True
                             if QGuiApplication.keyboardModifiers()
                             == Qt.KeyboardModifier.ControlModifier
@@ -1019,7 +1021,9 @@ class QtDriver(QObject):
                         )
                     )
                 )
-            elif item_type == ItemType.COLLATION:
+
+            else:
+                # TODO
                 collation = self.lib.get_collation(
                     self.nav_frames[self.cur_frame_idx].contents[i][1]
                 )
@@ -1045,7 +1049,7 @@ class QtDriver(QObject):
                 )
 
             # Restore Selected Borders
-            if (item_thumb.mode, item_thumb.item_id) in self.selected:
+            if search_result in self.selected:
                 item_thumb.thumb_button.set_selected(True)
             else:
                 item_thumb.thumb_button.set_selected(False)
@@ -1059,11 +1063,15 @@ class QtDriver(QObject):
 
     def update_badges(self):
         for item_thumb in self.item_thumbs:
+            # Skip not selected
+            if item_thumb.search_result not in self.selected:
+                continue
+
             item_thumb.update_badges()
 
+    # TODO
     def expand_collation(self, collation_entries: list[tuple[int, int]]):
         self.nav_forward([(ItemType.ENTRY, x[0]) for x in collation_entries])
-        # self.update_thumbs()
 
     def get_frame_contents(self, index: int = 0, query: str = ""):
         return (
@@ -1078,8 +1086,8 @@ class QtDriver(QObject):
                 f'Searching Library for "{query}"...'
             )
             self.main_window.statusbar.repaint()
-            start_time = time.time()
 
+            start_time = time.time()
             all_items = self.lib.search_library(query)
 
             frames: Frames = []
@@ -1099,11 +1107,10 @@ class QtDriver(QObject):
                 # page counts where they need to be updated.
                 self.nav_forward(*self.get_frame_contents(0, query))
             else:
-                # self.nav_forward(self.lib.search_library(query))
                 self.nav_forward(*self.get_frame_contents(0, query))
             self.cur_query = query
-
             end_time = time.time()
+
             if query:
                 self.main_window.statusbar.showMessage(
                     f'{len(all_items)} Results Found for "{query}" ({format_timespan(end_time - start_time)})'
@@ -1154,14 +1161,8 @@ class QtDriver(QObject):
         opened = self.lib.open_library(path)
         if not opened:
             logging.error(f"Failed to open library at {path}")
-            pass
 
-        else:
-            logging.info(
-                f"{ERROR} No existing TagStudio library found at '{path}'. Creating one."
-            )
-            print(f"Library Creation Return Code: {self.lib.create_library(path)}")
-            self.add_new_files_callback()
+        self.add_new_files_callback()
 
         self.update_libs_list(path)
         title_text = f"{self.base_title} - Library '{self.lib.root_path}'"
@@ -1298,7 +1299,6 @@ class QtDriver(QObject):
     def try_save_collage(self, increment_progress: bool):
         if increment_progress:
             self.completed += 1
-        # logging.info(f'threshold:{len(self.lib.entries}, completed:{self.completed}')
         if self.completed == len(self.lib.entries):
             filename = os.path.normpath(
                 f'{self.lib.library_dir}/{TS_FOLDER_NAME}/{COLLAGE_FOLDER_NAME}/collage_{dt.utcnow().strftime("%F_%T").replace(":", "")}.png'

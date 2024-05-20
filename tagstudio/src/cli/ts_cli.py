@@ -442,12 +442,6 @@ class CliDriver:
                 f'{ERROR} Invalid Path: "{path}"\nPress Enter to Return to Main Menu...'
             )
             input()
-        # if Core.open_library(path) == 1:
-        #     self.library_name = path
-        #     self.scr_library_home()
-        # else:
-        #     print(f'[ERROR]: No existing TagStudio library found at \'{path}\'')
-        #     self.scr_main_menu()
 
     def open_library(self, path):
         """Opens a TagStudio library."""
@@ -3074,21 +3068,6 @@ class CliDriver:
                 "Opened with Default Text Editor", f"{BLACK_FG}{BRIGHT_CYAN_BG}"
             )
         )
-        # print('')
-        # print(
-        # 	f'{BRIGHT_WHITE_BG}{BLACK_FG} {field_name}: {RESET} ')
-        # print(self.lib.get_field_attr(entry.fields[field_index], 'content'))
-        # for i, tag_id in enumerate(entry.fields[field_index][list(entry.fields[field_index].keys())[0]]):
-        # 	tag = self.lib.get_tag_from_id(tag_id)
-        # 	print(
-        # 		f'{self.get_tag_color(tag.color)}[{i+1}]{RESET} {self.get_tag_color(tag.color)} {tag.display_name(self.lib)} {RESET}')
-        # print('')
-
-        # print(self.format_subtitle(
-        # 	'Add <Tag Name>    Remove <#>    Open File    Close/Done    Quit'))
-
-        # new_content: str = click.edit(self.lib.get_field_attr(
-        # 	entry.fields[field_index], 'content'))
         new_content: str = ""  # NOTE: Removing
         if new_content is not None:
             if not allow_newlines:

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .tag import Tag
 
 Field = Union["TextField", "TagBoxField", "DatetimeField"]
+FieldType = Union["TextFieldTypes", "TagBoxTypes", "DateTimeTypes"]
 
 
 class TextFieldTypes(Enum):
@@ -23,6 +24,7 @@ class TextFieldTypes(Enum):
 
 
 class TagBoxTypes(Enum):
+    meta_tag_box = "Meta Tags"
     tag_box = "Tags"
 
 
@@ -57,6 +59,21 @@ class TextField(Base):
             self.entry = entry
         super().__init__()
 
+    def __key(self):
+        return (self.type, self.name, self.value)
+
+    def __hash__(self):
+        return hash(self.__key())
+
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, TextField):
+            return self.__key() == value.__key()
+        elif isinstance(value, TagBoxField):
+            return False
+        elif isinstance(value, DatetimeField):
+            return False
+        raise NotImplementedError
+
 
 class TagBoxField(Base):
     __tablename__ = "tag_box_fields"
@@ -65,10 +82,14 @@ class TagBoxField(Base):
     type: Mapped[TagBoxTypes] = mapped_column(default=TagBoxTypes.tag_box)
 
     entry_id: Mapped[int] = mapped_column(ForeignKey("entries.id"))
-    entry: Mapped[Entry] = relationship()
+    entry: Mapped[Entry] = relationship(foreign_keys=[entry_id])
 
     tags: Mapped[set[Tag]] = relationship(secondary=tag_fields)
     name: Mapped[str]
+
+    @property
+    def tag_ids(self) -> list[int]:
+        return [tag.id for tag in self.tags]
 
     def __init__(
         self,
@@ -84,6 +105,17 @@ class TagBoxField(Base):
         if entry:
             self.entry = entry
         super().__init__()
+
+    def __key(self):
+        return (self.type, self.name, str(self.tag_ids))
+
+    def __hash__(self):
+        return hash(self.__key())
+
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, TagBoxField):
+            return self.__key() == value.__key()
+        raise NotImplementedError
 
 
 class DatetimeField(Base):
@@ -112,3 +144,14 @@ class DatetimeField(Base):
         if entry:
             self.entry = entry
         super().__init__()
+
+    def __key(self):
+        return (self.type, self.name, self.value)
+
+    def __hash__(self):
+        return hash(self.__key())
+
+    def __eq__(self, value: object) -> bool:
+        if isinstance(value, DatetimeField):
+            return self.__key() == value.__key()
+        raise NotImplementedError

@@ -2,7 +2,7 @@
 # Licensed under the GPL-3.0 License.
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
-import typing
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QThreadPool, Signal
 from PySide6.QtGui import QStandardItem, QStandardItemModel
@@ -20,7 +20,7 @@ from src.qt.helpers.function_iterator import FunctionIterator
 from src.qt.widgets.progress import ProgressWidget
 
 # Only import for type checking/autocompletion, will not be imported at runtime.
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from src.qt.ts_qt import QtDriver
 
 
@@ -79,6 +79,7 @@ class DeleteUnlinkedEntriesModal(QWidget):
         for i in self.lib.missing_files:
             self.model.appendRow(QStandardItem(i))
 
+    # TODO
     def delete_entries(self):
         iterator = FunctionIterator(self.lib.remove_missing_files)
 

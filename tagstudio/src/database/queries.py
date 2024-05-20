@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import Sequence, TypeVar
+from typing import Sequence, Type, TypeVar
 
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 from src.database.table_declarations.entry import Entry  # type: ignore
 from src.database.table_declarations.field import (  # type: ignore
     DatetimeField,
+    Field,
     TagBoxField,
     TextField,
 )
@@ -25,14 +26,30 @@ def path_in_db(path: Path, engine: Engine) -> bool:
     return result_bool
 
 
-def get_object_by_id(id: int, type: Queryable, engine: Engine) -> Queryable:
-    with Session(engine) as session, session.begin():
-        result: Queryable | None = session.scalar(select(type).where(type.id == id))  # type: ignore
+def get_entry(entry: int | Entry, session: Session) -> Entry:
+    if isinstance(entry, Entry):
+        entry = entry.id
+    return get_object_by_id(id=entry, type=Entry, session=session)
 
-        if result is None:
-            raise ValueError(f"No {type} with id {id} found.")
 
-        session.expunge(result)
+def get_tag(tag: int | Tag, session: Session) -> Tag:
+    if isinstance(tag, Tag):
+        tag = tag.id
+    return get_object_by_id(id=tag, type=Tag, session=session)
+
+
+def get_field(field: Field, session: Session) -> Field:
+    return get_object_by_id(id=field.id, type=field.__class__, session=session)  # type: ignore
+
+
+def get_object_by_id(
+    id: int,
+    type: Type[Queryable],
+    session: Session,
+) -> Queryable:
+    result: Queryable = session.scalars(
+        select(type).where(type.id == id).limit(1)  # type: ignore
+    ).one()
 
     return result
 
@@ -40,13 +57,12 @@ def get_object_by_id(id: int, type: Queryable, engine: Engine) -> Queryable:
 def get_objects_by_ids(
     ids: Sequence[int],
     type: Queryable,
-    engine: Engine,
+    session: Session,
 ) -> list[Queryable]:
-    with Session(engine) as session, session.begin():
-        results: list[Queryable] = list(
-            session.scalars(select(type).where(type.id.in_(ids))).all()  # type: ignore
-        )
+    results: list[Queryable] = list(
+        session.scalars(select(type).where(type.id.in_(ids))).all()  # type: ignore
+    )
 
-        session.expunge(results)
+    session.expunge_all()
 
     return results

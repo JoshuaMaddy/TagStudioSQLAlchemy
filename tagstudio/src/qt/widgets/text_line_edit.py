@@ -1,17 +1,15 @@
 # Copyright (C) 2024 Travis Abendshien (CyanVoxel).
 # Licensed under the GPL-3.0 License.
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
-from typing import Callable
+from typing import Any, Callable
 
-from PySide6.QtWidgets import QVBoxLayout, QLineEdit
-
+from PySide6.QtWidgets import QLineEdit, QVBoxLayout
 from src.qt.widgets.panel import PanelWidget
 
 
 class EditTextLine(PanelWidget):
-    def __init__(self, text):
+    def __init__(self, text: str):
         super().__init__()
-        # self.setLayout()
         self.setMinimumWidth(480)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 0, 6, 0)
@@ -26,7 +24,7 @@ class EditTextLine(PanelWidget):
     def reset(self):
         self.text_edit.setText(self.text)
 
-    def add_callback(self, callback: Callable, event: str = "returnPressed"):
+    def add_callback(self, callback: Callable[[], Any], event: str = "returnPressed"):
         if event == "returnPressed":
             self.text_edit.returnPressed.connect(callback)
         else:

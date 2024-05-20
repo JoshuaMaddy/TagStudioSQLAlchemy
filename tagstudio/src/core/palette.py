@@ -4,6 +4,8 @@
 
 from enum import Enum
 
+from src.database.table_declarations.tag import TagColor
+
 
 class ColorType(int, Enum):
     PRIMARY = 0
@@ -278,11 +280,14 @@ _TAG_COLORS = {
 }
 
 
-def get_tag_color(type, color):
-    color = color.lower()
+def get_tag_color(type: ColorType, color: TagColor | str) -> str | ColorType:
+    if isinstance(color, TagColor):
+        color = str(color.value)
+
     try:
         if type == ColorType.TEXT:
-            return get_tag_color(_TAG_COLORS[color][type], color)
+            color_type: ColorType = _TAG_COLORS[color][type]
+            return get_tag_color(color_type, color)
         else:
             return _TAG_COLORS[color][type]
     except KeyError:

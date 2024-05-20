@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, select
-from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
-from src.alt_core.types import TagColor
+from dataclasses import dataclass, field
+
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from src.alt_core.types import TagColor  # type: ignore
 from src.core.json_typing import JsonTag  # type: ignore
 
 from .base import Base
 from .joins import tag_subtags
+
+
+@dataclass
+class TagInfo:
+    id: int | None
+    name: str
+    shorthand: str | None
+    color: TagColor
+    icon: str | None = None
+    aliases: set[str] = field(default_factory=set)
+    parent_tag_ids: set[int] = field(default_factory=set)
+    subtag_ids: set[int] = field(default_factory=set)
 
 
 class Tag(Base):
@@ -14,9 +28,9 @@ class Tag(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    name: Mapped[str]
+    name: Mapped[str] = mapped_column(unique=True)
     shorthand: Mapped[str | None]
-    color: Mapped[TagColor | None]
+    color: Mapped[TagColor]
     icon: Mapped[str | None]
 
     aliases: Mapped[set[TagAlias]] = relationship(back_populates="tag")
@@ -46,14 +60,16 @@ class Tag(Base):
     def __init__(
         self,
         name: str,
+        shorthand: str | None = None,
         aliases: set[TagAlias] = set(),
+        parent_tags: set[Tag] = set(),
         subtags: set[Tag] = set(),
         icon: str | None = None,
-        shorthand: str | None = None,
-        color: TagColor | None = None,
+        color: TagColor = TagColor.default,
     ):
         self.name = name
         self.aliases = aliases
+        self.parent_tags = parent_tags
         self.subtags = subtags
         self.color = color
         self.icon = icon
@@ -70,10 +86,11 @@ class Tag(Base):
     def __repr__(self) -> str:
         return self.__str__()
 
+    @property
     def display_name(self) -> str:
         """Returns a formatted tag name intended for displaying."""
-        if self.subtag_ids:
-            first_subtag = self.subtags.pop()
+        if self.subtags:
+            first_subtag = list(self.subtags.copy())[0]
             first_subtag_display_name = first_subtag.shorthand or first_subtag.name
             return f"{self.name}" f" ({first_subtag_display_name})"
         else:
@@ -98,22 +115,11 @@ class Tag(Base):
 
         return obj
 
-    def add_subtag(self, tag: Tag | int, session: Session):
-        if isinstance(tag, int):
-            tag_ = session.scalar(select(Tag).where(Tag.id == tag))
-            if not tag_:
-                raise ValueError
-            tag = tag_
+    def add_subtag(self, tag: Tag):
         if tag not in self.subtags:
             self.subtags.add(tag)
 
-    def remove_subtag(self, tag: Tag | int, session: Session):
-        if isinstance(tag, int):
-            tag_ = session.scalar(select(Tag).where(Tag.id == tag))
-            if not tag_:
-                raise ValueError
-            tag = tag_
-
+    def remove_subtag(self, tag: Tag):
         if tag in self.subtags:
             self.subtags.remove(tag)
 

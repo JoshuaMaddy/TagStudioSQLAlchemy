@@ -2,7 +2,7 @@
 # Licensed under the GPL-3.0 License.
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
@@ -18,9 +18,8 @@ class PanelModal(QWidget):
         widget: "PanelWidget",
         title: str,
         window_title: str,
-        done_callback: Callable = None,
-        #  cancel_callback:FunctionType=None,
-        save_callback: Callable = None,
+        done_callback: Callable[..., None] | None = None,
+        save_callback: Callable[..., None] | None = None,
         has_save: bool = False,
     ):
         # [Done]
@@ -46,9 +45,6 @@ class PanelModal(QWidget):
         self.button_layout = QHBoxLayout(self.button_container)
         self.button_layout.setContentsMargins(6, 6, 6, 6)
         self.button_layout.addStretch(1)
-
-        # self.cancel_button = QPushButton()
-        # self.cancel_button.setText('Cancel')
 
         if not (save_callback or has_save):
             self.done_button = QPushButton()
@@ -84,7 +80,8 @@ class PanelModal(QWidget):
             # trigger save button actions when pressing enter in the widget
             self.widget.add_callback(lambda: self.save_button.click())
 
-        widget.done.connect(lambda: save_callback(widget.get_content()))
+        if save_callback:
+            widget.done.connect(lambda: save_callback(widget.get_content()))
 
         self.root_layout.addWidget(self.title_widget)
         self.root_layout.addWidget(widget)
@@ -102,11 +99,11 @@ class PanelWidget(QWidget):
     def __init__(self):
         super().__init__()
 
-    def get_content(self) -> str:
+    def get_content(self) -> str:  # type: ignore
         pass
 
     def reset(self):
         pass
 
-    def add_callback(self, callback: Callable, event: str = "returnPressed"):
+    def add_callback(self, callback: Callable[[], Any], event: str = "returnPressed"):
         logging.warning(f"add_callback not implemented for {self.__class__.__name__}")

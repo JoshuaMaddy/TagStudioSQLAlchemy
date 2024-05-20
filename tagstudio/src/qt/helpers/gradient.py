@@ -2,10 +2,15 @@
 # Licensed under the GPL-3.0 License.
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
-from PIL import Image, ImageEnhance, ImageChops
+from PIL import Image, ImageChops, ImageEnhance
 
 
-def four_corner_gradient_background(image: Image.Image, adj_size, mask, hl):
+def four_corner_gradient_background(
+    image: Image.Image,
+    adj_size: int,
+    mask: Image.Image | int,
+    hl: Image.Image,
+):
     if image.size != (adj_size, adj_size):
         # Old 1 color method.
         # bg_col = image.copy().resize((1, 1)).getpixel((0,0))

@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
-from .field import DatetimeField, Field, TagBoxField, TextField
+from .field import DatetimeField, Field, TagBoxField, TagBoxTypes, TextField
 from .tag import Tag
 
 
@@ -32,9 +32,9 @@ class Entry(Base):
     @property
     def fields(self) -> list[Field]:
         fields: list[Field] = []
+        fields.extend(self.tag_box_fields)
         fields.extend(self.text_fields)
         fields.extend(self.datetime_fields)
-        fields.extend(self.tag_box_fields)
         fields = sorted(fields, key=lambda field: field.id)
         return fields
 
@@ -44,6 +44,22 @@ class Entry(Base):
         for tag_box_field in self.tag_box_fields:
             tag_set.update(tag_box_field.tags)
         return tag_set
+
+    @property
+    def favorited(self) -> bool:
+        for tag_box_field in self.tag_box_fields:
+            for tag in tag_box_field.tags:
+                if tag.name == "Favorite":
+                    return True
+        return False
+
+    @property
+    def archived(self) -> bool:
+        for tag_box_field in self.tag_box_fields:
+            for tag in tag_box_field.tags:
+                if tag.name == "Archived":
+                    return True
+        return False
 
     # TODO
     # # Any Type
@@ -68,6 +84,12 @@ class Entry(Base):
     ) -> None:
         self.path = path
         self.type = None
+        self.tag_box_fields.append(
+            TagBoxField(
+                name="Meta Tags",
+                type=TagBoxTypes.meta_tag_box,
+            )
+        )
 
         for field in fields:
             if isinstance(field, TextField):

@@ -17,11 +17,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy.orm import Session
-from src.alt_core.library import Library, Tag, TagAlias  # type: ignore
+from src.alt_core.library import Library, Tag  # type: ignore
 from src.core.palette import ColorType, get_tag_color  # type: ignore
-from src.database.queries import get_objects_by_ids  # type: ignore
-from src.database.table_declarations.tag import TagColor  # type: ignore
+from src.database import queries  # type: ignore
+from src.database.table_declarations.tag import TagColor, TagInfo  # type: ignore
 from src.qt.modals.tag_search import TagSearchPanel  # type: ignore
 from src.qt.widgets.panel import PanelModal, PanelWidget  # type: ignore
 from src.qt.widgets.tag import TagWidget  # type: ignore
@@ -36,7 +35,7 @@ logging.basicConfig(format="%(message)s", level=logging.INFO)
 class BuildTagPanel(PanelWidget):
     on_edit = Signal(Tag)
 
-    def __init__(self, library: Library, tag_id: int = -1):
+    def __init__(self, library: Library, tag: Tag | None = None):
         super().__init__()
         self.lib: Library = library
         self.setMinimumSize(300, 400)
@@ -145,12 +144,10 @@ class BuildTagPanel(PanelWidget):
         self.root_layout.addWidget(self.subtags_widget)
         self.root_layout.addWidget(self.color_widget)
 
-        if tag_id >= 0:
-            self.tag = self.lib.get_tag(tag_id)
-        else:
-            self.tag = Tag(name="New Tag")
-
-        self.set_tag(self.tag)
+        # Data
+        self.subtag_ids: set[int] = set()
+        self.tag = tag
+        self.__set_tag()
 
     def set_styles(self, color: str) -> None:
         self.color_field.setStyleSheet(
@@ -162,33 +159,27 @@ class BuildTagPanel(PanelWidget):
         )
 
     def add_subtag_callback(self, tag_id: int):
-        logging.info(f"Adding {tag_id}")
-        with Session(self.lib.engine) as session, session.begin():
-            self.tag.add_subtag(tag=tag_id, session=session)
-
-        self.set_subtags()
+        self.subtag_ids.add(tag_id)
+        self.set_subtag_widget()
 
     def remove_subtag_callback(self, tag_id: int):
-        logging.info(f"Removing {tag_id}")
-        with Session(self.lib.engine) as session, session.begin():
-            self.tag.remove_subtag(tag=tag_id, session=session)
+        self.subtag_ids.remove(tag_id)
+        self.set_subtag_widget()
 
-        self.set_subtags()
-
-    def set_subtags(self):
+    def set_subtag_widget(self):
+        # Clear entries
         while self.scroll_layout.itemAt(0):
             self.scroll_layout.takeAt(0).widget().deleteLater()
-
-        logging.info(f"Setting {self.tag.subtag_ids}")
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(3)
-        for tag_id in self.tag.subtag_ids:
+
+        for tag_id in self.subtag_ids:
             tag_widget = TagWidget(
                 library=self.lib,
-                tag=self.lib.get_tag(tag_id),
+                tag=self.lib.get_tag(tag=tag_id),
                 has_edit=False,
                 has_remove=True,
             )
@@ -199,39 +190,44 @@ class BuildTagPanel(PanelWidget):
 
         self.scroll_layout.addWidget(widget)
 
-    def set_tag(self, tag: Tag):
-        # tag = self.lib.get_tag(tag_id)
-        self.name_field.setText(tag.name)
-        self.shorthand_field.setText(tag.shorthand or "")
-        self.aliases_field.setText("\n".join(tag.alias_strings))
+    def __set_tag(self):
+        if self.tag is None:
+            tag = Tag(name="New Tag")
+            self.tag = tag
+            self.name_field.setText(self.tag.name)
+            self.shorthand_field.setText(self.tag.shorthand or "")
+            self.aliases_field.setText("\n".join(self.tag.alias_strings))
+            # TODO FIX
+            self.color_field.setCurrentIndex(0)
 
-        self.set_subtags()
+        else:
+            with self.lib.closing_database_session() as session:
+                tag_ = queries.get_tag(tag=self.tag.id, session=session)
 
-        # TODO FIX
-        self.color_field.setCurrentIndex(0)
+                self.name_field.setText(tag_.name)
+                self.shorthand_field.setText(tag_.shorthand or "")
+                self.aliases_field.setText("\n".join(tag_.alias_strings))
+                self.subtag_ids.update(tag_.subtag_ids)
+                # TODO FIX
+                self.color_field.setCurrentIndex(0)
 
-    def build_tag(self) -> Tag:
-        aliases = set(
-            [
-                TagAlias(name=name)
-                for name in self.aliases_field.toPlainText().split("\n")
-            ]
-        )
+        self.set_subtag_widget()
 
-        subtags: list[Tag] = get_objects_by_ids(
-            ids=self.tag.subtag_ids,
-            type=Tag,  # type: ignore
-            engine=self.lib.engine,
-        )
+    def build_tag(self) -> TagInfo:
+        aliases = set(self.aliases_field.toPlainText().split("\n"))
 
-        new_tag: Tag = Tag(
+        tag_color_name = self.color_field.currentText().lower() or "default"
+        tag_color_name = tag_color_name.replace(" ", "_")
+
+        tag_info = TagInfo(
+            id=self.tag.id if self.tag else None,
             name=self.name_field.text(),
             aliases=aliases,
             shorthand=self.shorthand_field.text() or None,
-            subtags=set(subtags),
-            color=TagColor[self.color_field.currentText().lower()],
+            subtag_ids=set(self.subtag_ids),
+            color=TagColor[tag_color_name],
         )
 
-        logging.info(f"Built {new_tag}")
+        logging.info(f"Built {tag_info}")
 
-        return new_tag
+        return tag_info

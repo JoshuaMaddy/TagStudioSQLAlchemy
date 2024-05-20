@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from src.core.library import Library
+from src.alt_core.library import Library
 from src.core.palette import ColorType, get_tag_color
 from src.qt.widgets.panel import PanelWidget
 from src.qt.widgets.tag import TagWidget
@@ -31,7 +31,7 @@ logging.basicConfig(format="%(message)s", level=logging.INFO)
 class TagSearchPanel(PanelWidget):
     tag_chosen = Signal(int)
 
-    def __init__(self, library):
+    def __init__(self, library: Library):
         super().__init__()
         self.lib: Library = library
         self.first_tag_id = None
@@ -81,27 +81,30 @@ class TagSearchPanel(PanelWidget):
         while self.scroll_layout.count():
             self.scroll_layout.takeAt(0).widget().deleteLater()
 
-        found_tags = self.lib.search_tags(query, include_cluster=True)[
-            : self.tag_limit - 1
-        ]
-        self.first_tag_id = found_tags[0] if found_tags else None
+        # TODO
+        found_tags = self.lib.search_tags(query)
 
-        for tag_id in found_tags:
-            c = QWidget()
-            l = QHBoxLayout(c)
-            l.setContentsMargins(0, 0, 0, 0)
-            l.setSpacing(3)
-            tw = TagWidget(self.lib, self.lib.get_tag(tag_id), False, False)
-            ab = QPushButton()
-            ab.setMinimumSize(23, 23)
-            ab.setMaximumSize(23, 23)
-            ab.setText("+")
-            ab.setStyleSheet(
+        for tag in found_tags:
+            widget = QWidget()
+            layout = QHBoxLayout(widget)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(3)
+            tag_widget = TagWidget(
+                library=self.lib,
+                tag=self.lib.get_tag(tag=tag.id, with_subtags=True),
+                has_edit=False,
+                has_remove=False,
+            )
+            button = QPushButton()
+            button.setMinimumSize(23, 23)
+            button.setMaximumSize(23, 23)
+            button.setText("+")
+            button.setStyleSheet(
                 f"QPushButton{{"
-                f"background: {get_tag_color(ColorType.PRIMARY, self.lib.get_tag(tag_id).color)};"
-                f"color: {get_tag_color(ColorType.TEXT, self.lib.get_tag(tag_id).color)};"
+                f"background: {get_tag_color(ColorType.PRIMARY, tag.color)};"
+                f"color: {get_tag_color(ColorType.TEXT, tag.color)};"
                 f"font-weight: 600;"
-                f"border-color:{get_tag_color(ColorType.BORDER, self.lib.get_tag(tag_id).color)};"
+                f"border-color:{get_tag_color(ColorType.BORDER, tag.color)};"
                 f"border-radius: 6px;"
                 f"border-style:solid;"
                 f"border-width: {math.ceil(1*self.devicePixelRatio())}px;"
@@ -110,16 +113,19 @@ class TagSearchPanel(PanelWidget):
                 f"}}"
                 f"QPushButton::hover"
                 f"{{"
-                f"border-color:{get_tag_color(ColorType.LIGHT_ACCENT, self.lib.get_tag(tag_id).color)};"
-                f"color: {get_tag_color(ColorType.DARK_ACCENT, self.lib.get_tag(tag_id).color)};"
-                f"background: {get_tag_color(ColorType.LIGHT_ACCENT, self.lib.get_tag(tag_id).color)};"
+                f"border-color:{get_tag_color(ColorType.LIGHT_ACCENT, tag.color)};"
+                f"color: {get_tag_color(ColorType.DARK_ACCENT, tag.color)};"
+                f"background: {get_tag_color(ColorType.LIGHT_ACCENT, tag.color)};"
                 f"}}"
             )
 
-            ab.clicked.connect(lambda checked=False, x=tag_id: self.tag_chosen.emit(x))
+            button.clicked.connect(
+                lambda checked=False, tag_id=tag.id: self.tag_chosen.emit(tag_id)
+            )
 
-            l.addWidget(tw)
-            l.addWidget(ab)
-            self.scroll_layout.addWidget(c)
+            layout.addWidget(tag_widget)
+            layout.addWidget(button)
+
+            self.scroll_layout.addWidget(widget)
 
         self.search_field.setFocus()

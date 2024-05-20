@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from src.core.library import Library  # type: ignore
+from src.alt_core.constants import DEFAULT_FIELDS
+from src.alt_core.library import Library  # type: ignore
 
 
 class AddFieldModal(QWidget):
@@ -43,12 +44,10 @@ class AddFieldModal(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
 
-        # TODO
-        """
-        for df in self.lib.default_fields:
+        for default_field in DEFAULT_FIELDS:
             self.combo_box.addItem(
-                f'{df["name"]} ({df["type"].replace("_", " ").title()})'  # type: ignore
-            )"""
+                f'{default_field.name} ({default_field.type_.value.replace("_", " ").title()})'
+            )
 
         self.button_container = QWidget()
         self.button_layout = QHBoxLayout(self.button_container)

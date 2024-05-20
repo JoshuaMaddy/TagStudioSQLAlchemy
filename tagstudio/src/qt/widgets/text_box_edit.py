@@ -3,15 +3,13 @@
 # Created for TagStudio: https://github.com/CyanVoxel/TagStudio
 
 
-from PySide6.QtWidgets import QVBoxLayout, QPlainTextEdit
-
+from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout
 from src.qt.widgets.panel import PanelWidget
 
 
 class EditTextBox(PanelWidget):
-    def __init__(self, text):
+    def __init__(self, text: str):
         super().__init__()
-        # self.setLayout()
         self.setMinimumSize(480, 480)
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(6, 0, 6, 0)
