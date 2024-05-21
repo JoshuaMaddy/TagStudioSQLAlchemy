@@ -2,7 +2,7 @@
 exclude = ["main_window.py", "home_ui.py", "resources.py", "resources_rc.py"]
 
 # E731 - variable lambda assignment
-ignore = ["E731"]
+lint.ignore = ["E731"]
 
 [tool.mypy]
 strict_optional = false

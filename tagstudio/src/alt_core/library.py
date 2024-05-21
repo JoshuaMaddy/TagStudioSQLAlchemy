@@ -12,7 +12,7 @@ import typing
 from pathlib import Path
 from typing import Iterator, Literal, cast
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, or_
 from sqlalchemy.orm import Session
 from src.alt_core import ts_core
 from src.alt_core.constants import DEFAULT_FIELDS
@@ -468,13 +468,21 @@ class Library:
                     potential_tag_id = query.split(":")[-1].strip()
                     if potential_tag_id.isdigit():
                         tag_id = int(potential_tag_id)
-
-                if tag_id is not None:
                     statement = (
                         statement.join(Entry.tag_box_fields)
                         .join(TagBoxField.tags)
                         .where(Tag.id == tag_id)
                     )
+                elif ":" not in query:
+                    # for now assume plain string is tag
+                    tag_value = query.strip()
+                    # check if Tag.name or Tag.shorthand matches the tag_value
+                    statement = (
+                        statement.join(Entry.tag_box_fields)
+                        .join(TagBoxField.tags)
+                        .where(or_(Tag.name == tag_value, Tag.shorthand == tag_value))
+                    )
+                    print("statement", statement)
                 else:
                     statement = statement.where(Entry.path.like(f"%{query}%"))
 

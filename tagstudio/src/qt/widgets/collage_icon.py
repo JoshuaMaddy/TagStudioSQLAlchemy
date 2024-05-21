@@ -116,7 +116,7 @@ class CollageIconRenderer(QObject):
                     except DecompressionBombError as e:
                         logging.info(f"[ERROR] One of the images was too big ({e})")
                 elif file_type in VIDEO_TYPES:
-                    video = cv2.VideoCapture(filepath)
+                    video = cv2.VideoCapture(str(filepath))
                     video.set(
                         cv2.CAP_PROP_POS_FRAMES,
                         (video.get(cv2.CAP_PROP_FRAME_COUNT) // 2),

@@ -19,7 +19,6 @@ from datetime import datetime as dt
 from itertools import batched
 from pathlib import Path
 from queue import Queue
-from signal import Signals
 from typing import Any, Callable
 
 from humanfriendly import format_timespan
@@ -216,14 +215,14 @@ class QtDriver(QObject):
         if dir not in (None, ""):
             self.open_library(dir)
 
-    def signal_handler(self, sig: Signals):
+    def signal_handler(self, sig, frame):
         if sig in (SIGINT, SIGTERM, SIGQUIT):
             self.SIGTERM.emit()
 
     def setup_signals(self):
-        signal(SIGINT, self.signal_handler)  # type: ignore
-        signal(SIGTERM, self.signal_handler)  # type: ignore
-        signal(SIGQUIT, self.signal_handler)  # type: ignore
+        signal(SIGINT, self.signal_handler)
+        signal(SIGTERM, self.signal_handler)
+        signal(SIGQUIT, self.signal_handler)
 
     def start(self) -> None:
         """Launches the main Qt window."""

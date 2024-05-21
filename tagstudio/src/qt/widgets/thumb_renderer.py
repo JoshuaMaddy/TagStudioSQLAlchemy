@@ -150,7 +150,7 @@ class ThumbRenderer(QObject):
 
                 # Videos =======================================================
                 elif extension in VIDEO_TYPES:
-                    video = cv2.VideoCapture(filepath)
+                    video = cv2.VideoCapture(str(filepath))
                     video.set(
                         propId=cv2.CAP_PROP_POS_FRAMES,
                         value=(video.get(cv2.CAP_PROP_FRAME_COUNT) // 2),
